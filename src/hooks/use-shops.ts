@@ -57,6 +57,7 @@ export function useShops() {
   const shopIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'shops'],
     async (api) => {
+      if (!(api.query as any).entityShop?.entityShopIds) return [];
       const raw = await (api.query as any).entityShop.entityShopIds(entityId);
       if (!raw) return [];
       const arr = raw.toJSON?.() ?? raw;
@@ -73,7 +74,7 @@ export function useShops() {
       if (!ids || ids.length === 0) return [];
 
       const results = await Promise.all(
-        ids.map((id) => (api.query as any).entityShop.shops(id)),
+        ids.map((id) => (api.query as any).entityShop?.shops?.(id) ?? Promise.resolve(null)),
       );
 
       return results

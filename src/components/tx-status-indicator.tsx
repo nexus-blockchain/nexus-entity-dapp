@@ -2,60 +2,76 @@
 
 import React from 'react';
 import type { TxState } from '@/lib/types/models';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils/cn';
+import { Loader2, CheckCircle, XCircle, Radio } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 export interface TxStatusIndicatorProps {
   txState: TxState;
 }
 
-/**
- * Real-time transaction status display.
- * Hidden when status is 'idle'; otherwise shows status with appropriate color.
- */
 export function TxStatusIndicator({ txState }: TxStatusIndicatorProps) {
+  const t = useTranslations('tx');
   if (txState.status === 'idle') return null;
 
-  const { label, color } = statusConfig[txState.status];
+  const config = statusConfig[txState.status];
+  const label = resolveLabel(txState, t);
 
   return (
-    <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${color}`} data-testid="tx-status">
-      <span data-testid="tx-status-label">{resolveLabel(label, txState)}</span>
+    <div className={cn('flex items-center gap-2 text-sm', config.className)} data-testid="tx-status">
+      {config.icon}
+      <span data-testid="tx-status-label">{label}</span>
     </div>
   );
 }
 
-const statusConfig: Record<Exclude<TxState['status'], 'idle'>, { label: string; color: string }> = {
+const statusConfig: Record<Exclude<TxState['status'], 'idle'>, {
+  className: string;
+  icon: React.ReactNode;
+}> = {
   signing: {
-    label: 'Waiting for signature...',
-    color: 'bg-yellow-50 text-yellow-800',
+    className: 'text-warning',
+    icon: <Loader2 className="h-4 w-4 animate-spin" />,
   },
   broadcasting: {
-    label: 'Broadcasting...',
-    color: 'bg-blue-50 text-blue-800',
+    className: 'text-primary',
+    icon: <Radio className="h-4 w-4 animate-pulse" />,
   },
   inBlock: {
-    label: 'Included in block #{blockNumber}',
-    color: 'bg-blue-50 text-blue-800',
+    className: 'text-primary',
+    icon: <Loader2 className="h-4 w-4 animate-spin" />,
   },
   finalized: {
-    label: 'Finalized ✓',
-    color: 'bg-green-50 text-green-800',
+    className: 'text-green-600',
+    icon: <CheckCircle className="h-4 w-4" />,
   },
   error: {
-    label: '{error}',
-    color: 'bg-red-50 text-red-800',
+    className: 'text-destructive',
+    icon: <XCircle className="h-4 w-4" />,
   },
 };
 
-function resolveLabel(template: string, txState: TxState): string {
-  let result = template;
-  if (txState.blockNumber !== null) {
-    result = result.replace('{blockNumber}', String(txState.blockNumber));
+function resolveLabel(txState: TxState, t: ReturnType<typeof useTranslations<'tx'>>): string {
+  switch (txState.status) {
+    case 'signing':
+      return t('signing');
+    case 'broadcasting':
+      return t('broadcasting');
+    case 'inBlock': {
+      const label = t('inBlock', { blockNumber: txState.blockNumber !== null ? String(txState.blockNumber) : '' });
+      return label;
+    }
+    case 'finalized': {
+      const label = t('finalized');
+      if (txState.hash) {
+        return `${label} (${txState.hash.slice(0, 10)}...)`;
+      }
+      return label;
+    }
+    case 'error':
+      return txState.error ?? t('error');
+    default:
+      return '';
   }
-  if (txState.error !== null) {
-    result = result.replace('{error}', txState.error);
-  }
-  if (txState.status === 'finalized' && txState.hash) {
-    return `${result} (${txState.hash.slice(0, 10)}…)`;
-  }
-  return result;
 }

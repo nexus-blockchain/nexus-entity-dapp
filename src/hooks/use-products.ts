@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -42,6 +42,7 @@ export function useProducts(shopId: number) {
   const productIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'shop', shopId, 'products'],
     async (api) => {
+      if (!hasPallet(api, 'entityProduct')) return [];
       const raw = await (api.query as any).entityProduct.shopProducts(shopId);
       if (!raw) return [];
       const arr = raw.toJSON?.() ?? raw;
@@ -54,6 +55,7 @@ export function useProducts(shopId: number) {
   const productsQuery = useEntityQuery<ProductData[]>(
     ['entity', entityId, 'shop', shopId, 'products', 'data', productIdsQuery.data],
     async (api) => {
+      if (!hasPallet(api, 'entityProduct')) return [];
       const ids = productIdsQuery.data;
       if (!ids || ids.length === 0) return [];
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -64,7 +64,10 @@ export function useCommission() {
   const configQuery = useEntityQuery<CommissionConfig | null>(
     ['entity', entityId, 'commission'],
     async (api) => {
-      const raw = await (api.query as any).commissionCore.commissionConfigs(entityId);
+      if (!hasPallet(api, 'commissionCore')) return null;
+      const fn = (api.query as any).commissionCore.commissionConfigs;
+      if (!fn) return null;
+      const raw = await fn(entityId);
       return parseCommissionConfig(raw);
     },
     { staleTime: STALE_TIMES.members },
@@ -74,8 +77,11 @@ export function useCommission() {
     useEntityQuery<{ nexEarned: bigint; tokenEarned: bigint }>(
       ['entity', entityId, 'commission', 'member', account],
       async (api) => {
+        if (!hasPallet(api, 'commissionCore')) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
         if (!account) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
-        const raw = await (api.query as any).commissionCore.memberCommissions(entityId, account);
+        const fn = (api.query as any).commissionCore.memberCommissions;
+        if (!fn) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
+        const raw = await fn(entityId, account);
         return parseMemberCommission(raw);
       },
       { staleTime: STALE_TIMES.members, enabled: !!account },
@@ -84,7 +90,20 @@ export function useCommission() {
   const orderCommissionsQuery = useEntityQuery<{ orderId: number; amount: bigint; plugin: string }[]>(
     ['entity', entityId, 'commission', 'orders'],
     async (api) => {
-      const raw = await (api.query as any).commissionCore.orderCommissions.entries(entityId);
+      if (!hasPallet(api, 'commissionCore')) return [];
+      const pallet = (api.query as any).commissionCore;
+      const storageFn = pallet.orderCommissions;
+      if (!storageFn?.entries) return [];
+      let raw: [any, any][];
+      try {
+        raw = await storageFn.entries(entityId);
+      } catch {
+        const all = await storageFn.entries();
+        raw = (all as [any, any][]).filter(([key]: [any, any]) => {
+          const eid = Number(key.args?.[0]?.toString() ?? 0);
+          return eid === entityId;
+        });
+      }
       return parseOrderCommissions(raw);
     },
     { staleTime: STALE_TIMES.members },

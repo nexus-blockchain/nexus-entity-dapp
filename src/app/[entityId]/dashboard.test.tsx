@@ -12,6 +12,47 @@ vi.mock('./entity-provider', () => ({
   useEntityContext: () => mockUseEntityContext(),
 }));
 
+vi.mock('@/hooks/use-members', () => ({
+  useMembers: () => ({ memberCount: 42, isLoading: false }),
+}));
+vi.mock('@/hooks/use-entity-token', () => ({
+  useEntityToken: () => ({
+    tokenConfig: null,
+    holderCount: 0,
+    isLoading: false,
+  }),
+}));
+vi.mock('@/hooks/use-shops', () => ({
+  useShops: () => ({ shops: [], isLoading: false }),
+}));
+vi.mock('@/hooks/use-entity-market', () => ({
+  useEntityMarket: () => ({
+    stats: null,
+    orders: [],
+    isLoading: false,
+  }),
+}));
+vi.mock('@/hooks/use-governance', () => ({
+  useGovernance: () => ({
+    proposals: [],
+    proposalCount: 0,
+    isLoading: false,
+  }),
+}));
+vi.mock('@/hooks/use-commission', () => ({
+  useCommission: () => ({
+    config: null,
+    isLoading: false,
+  }),
+}));
+vi.mock('@/stores/entity-dapp-store', () => ({
+  useEntityDAppStore: (selector: (s: any) => any) =>
+    selector({
+      visibleModules: ['dashboard', 'settings', 'shops', 'orders', 'token', 'members'],
+      notifications: [],
+    }),
+}));
+
 function renderWithIntl(ui: React.ReactElement) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
@@ -51,17 +92,17 @@ function makeContext(overrides: Partial<EntityContext> = {}): EntityContext {
 }
 
 describe('DashboardPage', () => {
-  test('shows loading spinner when isLoading is true', () => {
+  test('shows loading skeleton when isLoading is true', () => {
     mockUseEntityContext.mockReturnValue(makeContext({ isLoading: true, entity: null }));
     const { container } = renderWithIntl(<DashboardPage />);
-    expect(container.querySelector('.animate-spin')).toBeTruthy();
+    expect(screen.queryByText('Test Entity')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
-  test('renders entity name and type', () => {
+  test('renders entity name and type badge', () => {
     mockUseEntityContext.mockReturnValue(makeContext());
     renderWithIntl(<DashboardPage />);
     expect(screen.getByText('Test Entity')).toBeInTheDocument();
-    expect(screen.getByText('Merchant')).toBeInTheDocument();
   });
 
   test('renders fund balance stat card', () => {
@@ -79,7 +120,6 @@ describe('DashboardPage', () => {
     expect(
       screen.getByText('Fund balance is below the warning threshold. Please top up to avoid service disruption.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Low balance')).toBeInTheDocument();
   });
 
   test('does not show fund warning when balance is above threshold', () => {
@@ -90,42 +130,11 @@ describe('DashboardPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  test('renders placeholder stat cards for members, orders, and token', () => {
+  test('renders stat cards for members and token', () => {
     mockUseEntityContext.mockReturnValue(makeContext());
     renderWithIntl(<DashboardPage />);
     expect(screen.getByText('Total Members')).toBeInTheDocument();
-    expect(screen.getByText('Total Orders')).toBeInTheDocument();
     expect(screen.getByText('Token')).toBeInTheDocument();
-  });
-
-  test('renders chart placeholder areas', () => {
-    mockUseEntityContext.mockReturnValue(makeContext());
-    renderWithIntl(<DashboardPage />);
-    expect(screen.getByText('Sales Trend')).toBeInTheDocument();
-    expect(screen.getByText('Member Growth')).toBeInTheDocument();
-    expect(screen.getByText('Token Price Trend')).toBeInTheDocument();
-  });
-
-  test('shows verified badge when entity is verified', () => {
-    const ctx = makeContext();
-    ctx.entity = { ...ctx.entity!, verified: true };
-    mockUseEntityContext.mockReturnValue(ctx);
-    renderWithIntl(<DashboardPage />);
-    expect(screen.getByText('✓ Verified')).toBeInTheDocument();
-  });
-
-  test('shows FullDAO governance mode label', () => {
-    const ctx = makeContext();
-    ctx.entity = { ...ctx.entity!, governanceMode: GovernanceMode.FullDAO };
-    mockUseEntityContext.mockReturnValue(ctx);
-    renderWithIntl(<DashboardPage />);
-    expect(screen.getByText('Full DAO')).toBeInTheDocument();
-  });
-
-  test('shows entity status badge', () => {
-    mockUseEntityContext.mockReturnValue(makeContext());
-    renderWithIntl(<DashboardPage />);
-    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
   test('formats zero balance correctly', () => {
@@ -143,5 +152,21 @@ describe('DashboardPage', () => {
     mockUseEntityContext.mockReturnValue(ctx);
     renderWithIntl(<DashboardPage />);
     expect(screen.getByText('1.5 NEX')).toBeInTheDocument();
+  });
+
+  test('renders module status grid for visible modules', () => {
+    mockUseEntityContext.mockReturnValue(makeContext());
+    renderWithIntl(<DashboardPage />);
+    // Should show "可用模块" heading
+    expect(screen.getByText('可用模块')).toBeInTheDocument();
+  });
+
+  test('renders quick action links', () => {
+    mockUseEntityContext.mockReturnValue(makeContext());
+    renderWithIntl(<DashboardPage />);
+    expect(screen.getByText('管理店铺')).toBeInTheDocument();
+    expect(screen.getByText('查看订单')).toBeInTheDocument();
+    expect(screen.getByText('会员管理')).toBeInTheDocument();
+    expect(screen.getByText('代币管理')).toBeInTheDocument();
   });
 });

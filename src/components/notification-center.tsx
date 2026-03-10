@@ -2,6 +2,14 @@
 
 import React, { useState } from 'react';
 import type { Notification } from '@/lib/types/models';
+import { cn } from '@/lib/utils/cn';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
+import { Bell, Check, Trash2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 export interface NotificationCenterProps {
   notifications: Notification[];
@@ -10,86 +18,71 @@ export interface NotificationCenterProps {
   onClearAll: () => void;
 }
 
-/**
- * Notification center component.
- * Displays a bell icon with unread badge, and a dropdown panel listing
- * event notifications with mark-as-read and clear-all actions.
- */
 export function NotificationCenter({
   notifications,
   unreadCount,
   onMarkAsRead,
   onClearAll,
 }: NotificationCenterProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  const t = useTranslations('notifications');
 
   return (
-    <div className="relative" data-testid="notification-center">
-      {/* Bell button with unread badge */}
-      <button
-        type="button"
-        className="relative rounded-md p-2 text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
-        data-testid="notification-bell"
-      >
-        <BellIcon />
-        {unreadCount > 0 && (
-          <span
-            className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-medium text-white"
-            data-testid="notification-badge"
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        )}
-      </button>
-
-      {/* Dropdown panel */}
-      {isOpen && (
-        <div
-          className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-gray-200 bg-white shadow-lg"
-          data-testid="notification-panel"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative"
+          aria-label={unreadCount > 0 ? t('titleWithCount', { count: unreadCount }) : t('title')}
+          data-testid="notification-bell"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-            <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-            {notifications.length > 0 && (
-              <button
-                type="button"
-                className="text-xs text-blue-600 hover:text-blue-800"
-                onClick={onClearAll}
-                data-testid="notification-clear-all"
-              >
-                Clear all
-              </button>
-            )}
-          </div>
-
-          {/* Notification list */}
-          <div className="max-h-96 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-gray-400" data-testid="notification-empty">
-                No notifications
-              </div>
-            ) : (
-              <ul>
-                {notifications.map((notification) => (
-                  <NotificationItem
-                    key={notification.id}
-                    notification={notification}
-                    onMarkAsRead={onMarkAsRead}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
+          <Bell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-0" align="end">
+        <div className="flex items-center justify-between px-4 py-3">
+          <h3 className="text-sm font-semibold">{t('title')}</h3>
+          {notifications.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto px-2 py-1 text-xs"
+              onClick={onClearAll}
+              data-testid="notification-clear-all"
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              {t('clearAll')}
+            </Button>
+          )}
         </div>
-      )}
-    </div>
+        <Separator />
+        <ScrollArea className="max-h-96">
+          {notifications.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground" data-testid="notification-empty">
+              {t('noNotifications')}
+            </div>
+          ) : (
+            <div>
+              {notifications.map((notification) => (
+                <NotificationItem
+                  key={notification.id}
+                  notification={notification}
+                  onMarkAsRead={onMarkAsRead}
+                />
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
   );
 }
-
-// ─── Notification Item ──────────────────────────────────────
 
 interface NotificationItemProps {
   notification: Notification;
@@ -97,70 +90,50 @@ interface NotificationItemProps {
 }
 
 function NotificationItem({ notification, onMarkAsRead }: NotificationItemProps) {
-  const timeAgo = formatTimeAgo(notification.timestamp);
+  const t = useTranslations('notifications');
+  const timeAgo = formatTimeAgo(notification.timestamp, t);
 
   return (
-    <li
-      className={`border-b border-gray-50 px-4 py-3 last:border-b-0 ${
-        notification.read ? 'bg-white' : 'bg-blue-50'
-      }`}
+    <div
+      className={cn(
+        'border-b px-4 py-3 last:border-b-0 transition-colors',
+        notification.read ? 'bg-background' : 'bg-primary/5',
+      )}
       data-testid={`notification-item-${notification.id}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-gray-900">{notification.summary}</p>
+          <p className="text-sm">{notification.summary}</p>
           <div className="mt-1 flex items-center gap-2">
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
               {notification.pallet}
-            </span>
-            <span className="text-xs text-gray-400">{timeAgo}</span>
+            </Badge>
+            <span className="text-xs text-muted-foreground">{timeAgo}</span>
           </div>
         </div>
         {!notification.read && (
-          <button
-            type="button"
-            className="mt-0.5 shrink-0 rounded p-1 text-blue-500 hover:bg-blue-100"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
             onClick={() => onMarkAsRead(notification.id)}
-            aria-label="Mark as read"
-            data-testid={`notification-mark-read-${notification.id}`}
+            aria-label={t('markAsRead')}
           >
-            <span className="block h-2 w-2 rounded-full bg-blue-500" />
-          </button>
+            <Check className="h-3 w-3" />
+          </Button>
         )}
       </div>
-    </li>
+    </div>
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function formatTimeAgo(timestamp: number): string {
+function formatTimeAgo(timestamp: number, t: ReturnType<typeof useTranslations<'notifications'>>): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return t('timeJustNow');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('timeMinutesAgo', { minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('timeHoursAgo', { hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function BellIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-    </svg>
-  );
+  return t('timeDaysAgo', { days });
 }

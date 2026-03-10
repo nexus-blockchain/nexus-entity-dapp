@@ -1,9 +1,12 @@
-import { DashboardPage } from './dashboard-client';
+import dynamic from 'next/dynamic';
 
-// Required for `output: "export"` — entity IDs are dynamic/runtime,
-// so we return an empty array and rely on client-side rendering.
+const DashboardPage = dynamic(
+  () => import('./dashboard-client').then((m) => m.DashboardPage),
+  { ssr: false },
+);
+
 export function generateStaticParams() {
-  return [];
+  return [{ entityId: '0' }];
 }
 
 export default function Page() {

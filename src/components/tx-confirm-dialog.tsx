@@ -2,6 +2,20 @@
 
 import React, { useState, useCallback } from 'react';
 import type { ConfirmDialogConfig } from '@/lib/types/models';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils/cn';
+import { AlertTriangle, Info, ShieldAlert } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 export interface TxConfirmDialogProps {
   open: boolean;
@@ -10,36 +24,23 @@ export interface TxConfirmDialogProps {
   config: ConfirmDialogConfig;
 }
 
-const severityStyles: Record<ConfirmDialogConfig['severity'], { border: string; bg: string; text: string; button: string }> = {
-  info: {
-    border: 'border-blue-300',
-    bg: 'bg-blue-50',
-    text: 'text-blue-800',
-    button: 'bg-blue-600 hover:bg-blue-700 text-white',
-  },
-  warning: {
-    border: 'border-yellow-300',
-    bg: 'bg-yellow-50',
-    text: 'text-yellow-800',
-    button: 'bg-yellow-600 hover:bg-yellow-700 text-white',
-  },
-  danger: {
-    border: 'border-red-300',
-    bg: 'bg-red-50',
-    text: 'text-red-800',
-    button: 'bg-red-600 hover:bg-red-700 text-white',
-  },
+const severityIcon: Record<ConfirmDialogConfig['severity'], React.ReactNode> = {
+  info: <Info className="h-5 w-5 text-primary" />,
+  warning: <AlertTriangle className="h-5 w-5 text-warning" />,
+  danger: <ShieldAlert className="h-5 w-5 text-destructive" />,
 };
 
-/**
- * Confirmation dialog for dangerous / irreversible operations.
- * When `config.requireInput` is set the user must type the exact text
- * before the confirm button becomes enabled.
- */
+const severityBg: Record<ConfirmDialogConfig['severity'], string> = {
+  info: 'bg-primary/5 border-primary/20 text-primary',
+  warning: 'bg-warning/5 border-warning/20 text-warning',
+  danger: 'bg-destructive/5 border-destructive/20 text-destructive',
+};
+
 export function TxConfirmDialog({ open, onClose, onConfirm, config }: TxConfirmDialogProps) {
   const [inputValue, setInputValue] = useState('');
+  const t = useTranslations('tx');
+  const tc = useTranslations('common');
 
-  const styles = severityStyles[config.severity];
   const needsInput = typeof config.requireInput === 'string' && config.requireInput.length > 0;
   const confirmEnabled = needsInput ? inputValue === config.requireInput : true;
 
@@ -50,46 +51,34 @@ export function TxConfirmDialog({ open, onClose, onConfirm, config }: TxConfirmD
     }
   }, [confirmEnabled, onConfirm]);
 
-  const handleClose = useCallback(() => {
-    setInputValue('');
-    onClose();
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (!isOpen) {
+      setInputValue('');
+      onClose();
+    }
   }, [onClose]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      data-testid="tx-confirm-overlay"
-      onClick={handleClose}
-      onKeyDown={undefined}
-      role="presentation"
-    >
-      <div
-        className={`mx-4 w-full max-w-md rounded-lg border ${styles.border} bg-white p-6 shadow-lg`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tx-confirm-title"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={undefined}
-      >
-        <h2 id="tx-confirm-title" className={`mb-2 text-lg font-semibold ${styles.text}`}>
-          {config.title}
-        </h2>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            {severityIcon[config.severity]}
+            <DialogTitle>{config.title}</DialogTitle>
+          </div>
+        </DialogHeader>
 
-        <div className={`mb-4 rounded-md ${styles.bg} p-3 text-sm ${styles.text}`}>
+        <div className={cn('rounded-md border p-3 text-sm', severityBg[config.severity])}>
           {config.description}
         </div>
 
         {needsInput && (
-          <div className="mb-4">
-            <label htmlFor="confirm-input" className="mb-1 block text-sm text-gray-600">
-              Type <span className="font-mono font-semibold">{config.requireInput}</span> to confirm
-            </label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="confirm-input">
+              {t('inputConfirm', { input: config.requireInput! })}
+            </Label>
+            <Input
               id="confirm-input"
-              type="text"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder={config.requireInput}
@@ -98,24 +87,19 @@ export function TxConfirmDialog({ open, onClose, onConfirm, config }: TxConfirmD
           </div>
         )}
 
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            onClick={handleClose}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-4 py-2 text-sm ${styles.button} disabled:cursor-not-allowed disabled:opacity-50`}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
+            {tc('cancel')}
+          </Button>
+          <Button
+            variant={config.severity === 'danger' ? 'destructive' : 'default'}
             disabled={!confirmEnabled}
             onClick={handleConfirm}
           >
-            Confirm
-          </button>
-        </div>
-      </div>
-    </div>
+            {tc('confirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

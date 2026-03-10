@@ -2,6 +2,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ipfsUrl } from '@/lib/utils/ipfs';
+import { cn } from '@/lib/utils/cn';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 interface IpfsContentProps {
   cid: string;
@@ -12,6 +17,7 @@ export function IpfsContent({ cid, className }: IpfsContentProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const t = useTranslations('ipfs');
 
   const fetchContent = useCallback(async () => {
     setLoading(true);
@@ -39,36 +45,28 @@ export function IpfsContent({ cid, className }: IpfsContentProps) {
   if (loading) {
     return (
       <div className={className} role="status" aria-label="Loading content">
-        <span style={{ color: '#9ca3af' }}>Loading content…</span>
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="mt-2 h-4 w-3/4" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className={className} role="alert">
-        <span style={{ color: '#ef4444' }}>Failed to load content</span>
-        <button
-          onClick={fetchContent}
-          style={{
-            marginLeft: 8,
-            color: '#3b82f6',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            textDecoration: 'underline',
-          }}
-          type="button"
-        >
-          Retry
-        </button>
+      <div className={cn('flex items-center gap-2 text-sm text-destructive', className)} role="alert">
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>{t('loadFailed')}</span>
+        <Button variant="ghost" size="sm" className="h-auto px-2 py-0.5 text-xs" onClick={fetchContent}>
+          <RefreshCw className="mr-1 h-3 w-3" />
+          {t('retry')}
+        </Button>
       </div>
     );
   }
 
   return (
     <div className={className}>
-      <p style={{ whiteSpace: 'pre-wrap' }}>{content}</p>
+      <p className="whitespace-pre-wrap text-sm">{content}</p>
     </div>
   );
 }

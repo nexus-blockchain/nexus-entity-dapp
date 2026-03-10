@@ -2,29 +2,37 @@
 
 import React from 'react';
 import { useEscrowStatus, type EscrowStatus } from '@/hooks/use-escrow-status';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Shield, AlertCircle } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
-const ESCROW_STATUS_CONFIG: Record<EscrowStatus, { label: string; color: string }> = {
-  Held: { label: '托管中', color: 'text-blue-700 bg-blue-50' },
-  Released: { label: '已释放', color: 'text-green-700 bg-green-50' },
-  Refunded: { label: '已退回', color: 'text-yellow-700 bg-yellow-50' },
-  Disputed: { label: '争议冻结', color: 'text-red-700 bg-red-50' },
+const ESCROW_STATUS_CONFIG: Record<EscrowStatus, { labelKey: string; variant: 'default' | 'secondary' | 'destructive' | 'success' | 'warning' | 'outline' }> = {
+  Held: { labelKey: 'escrowStatus.Escrowed', variant: 'default' },
+  Released: { labelKey: 'escrowStatus.Released', variant: 'success' },
+  Refunded: { labelKey: 'escrowStatus.Refunded', variant: 'warning' },
+  Disputed: { labelKey: 'escrowStatus.DisputeFrozen', variant: 'destructive' },
 };
 
 export function EscrowStatusSection({ escrowId }: { escrowId: number }) {
   const { escrow, isLoading, isError } = useEscrowStatus(escrowId);
+  const t = useTranslations('order');
+  const te = useTranslations('enums');
 
   if (isLoading) {
     return (
-      <div className="mt-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-400 dark:border-gray-700 dark:bg-gray-800">
-        托管状态加载中…
+      <div className="mt-2 flex items-center gap-2">
+        <Shield className="h-3 w-3 text-muted-foreground" />
+        <Skeleton className="h-4 w-24" />
       </div>
     );
   }
 
   if (isError || !escrow) {
     return (
-      <div className="mt-2 rounded-md border border-yellow-100 bg-yellow-50 px-3 py-2 text-xs text-yellow-600 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400">
-        ⚠ Escrow 数据暂不可用
+      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <AlertCircle className="h-3 w-3" />
+        <span>{t('escrowUnavailable')}</span>
       </div>
     );
   }
@@ -32,11 +40,13 @@ export function EscrowStatusSection({ escrowId }: { escrowId: number }) {
   const cfg = ESCROW_STATUS_CONFIG[escrow.status];
 
   return (
-    <div className={`mt-2 rounded-md border px-3 py-2 text-xs ${cfg.color} border-current/10`}>
-      <span className="font-medium">托管状态:</span> {cfg.label}
-      <span className="ml-2 opacity-70">
-        (ID: {escrow.id})
-      </span>
+    <div className="mt-2 flex items-center gap-2 text-xs">
+      <Shield className="h-3 w-3 text-muted-foreground" />
+      <span className="text-muted-foreground">{t('escrowLabel')}</span>
+      <Badge variant={cfg.variant} className="text-[10px] px-1.5 py-0">
+        {te(cfg.labelKey)}
+      </Badge>
+      <span className="text-muted-foreground opacity-70">{t('escrowIdLabel', { id: escrow.id })}</span>
     </div>
   );
 }

@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-import { Providers } from "./providers";
+import dynamic from "next/dynamic";
+
+const Providers = dynamic(() => import("./providers").then((mod) => mod.Providers), {
+  ssr: false,
+});
+const Toaster = dynamic(
+  () => import("@/components/ui/toaster").then((mod) => mod.Toaster),
+  { ssr: false },
+);
 
 export const metadata: Metadata = {
   title: "NEXUS Entity dApp",
@@ -13,9 +21,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen bg-background font-sans antialiased">
         <Providers>{children}</Providers>
+        <Toaster />
       </body>
     </html>
   );

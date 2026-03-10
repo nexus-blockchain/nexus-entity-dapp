@@ -1,8 +1,9 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
+import { useWallet } from './use-wallet';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
 import type { TokenConfig } from '@/lib/types/models';
@@ -48,12 +49,17 @@ export function getTokenRightsLabel(tokenType: TokenType): string {
 
 export function useEntityToken() {
   const { entityId } = useEntityContext();
+  const { address } = useWallet();
 
   // Query token config
   const tokenConfigQuery = useEntityQuery<TokenConfig | null>(
     ['entity', entityId, 'token'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.tokenConfigs(entityId);
+      if (!hasPallet(api, 'entityToken')) return null;
+      const pallet = (api.query as any).entityToken;
+      const fn = pallet.tokenConfigs ?? pallet.tokenConfig ?? pallet.tokens;
+      if (!fn) return null;
+      const raw = await fn(entityId);
       return parseTokenConfig(raw, entityId);
     },
     { staleTime: STALE_TIMES.token },
@@ -63,7 +69,10 @@ export function useEntityToken() {
   const holderCountQuery = useEntityQuery<number>(
     ['entity', entityId, 'token', 'holderCount'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.tokenHolderCount(entityId);
+      if (!hasPallet(api, 'entityToken')) return 0;
+      const fn = (api.query as any).entityToken.tokenHolderCount ?? (api.query as any).entityToken.holderCount;
+      if (!fn) return 0;
+      const raw = await fn(entityId);
       return Number(raw?.toString() ?? 0);
     },
     { staleTime: STALE_TIMES.token },
@@ -73,12 +82,30 @@ export function useEntityToken() {
   const holdersQuery = useEntityQuery<{ account: string; balance: bigint }[]>(
     ['entity', entityId, 'token', 'holders'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.tokenHolders.entries(entityId);
-      if (!raw || !Array.isArray(raw)) return [];
-      return raw.map(([key, value]: [any, any]) => ({
-        account: key.args[1]?.toString() ?? '',
-        balance: BigInt(String(value?.toString() ?? 0)),
-      }));
+      if (!hasPallet(api, 'entityToken')) return [];
+      const storageFn = (api.query as any).entityToken.tokenHolders ?? (api.query as any).entityToken.holders;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw.map(([key, value]: [any, any]) => ({
+          account: key.args[1]?.toString() ?? key.args[0]?.toString() ?? '',
+          balance: BigInt(String(value?.toString() ?? 0)),
+        }));
+      } catch {
+        // Fallback: single-key StorageMap, iterate all and filter
+        const raw = await storageFn.entries();
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw
+          .filter(([, value]: [any, any]) => {
+            const obj = value?.toJSON?.() ?? value;
+            return Number(obj.entityId ?? obj.entity_id ?? 0) === entityId;
+          })
+          .map(([key, value]: [any, any]) => ({
+            account: key.args[1]?.toString() ?? key.args[0]?.toString() ?? '',
+            balance: BigInt(String(value?.toString() ?? 0)),
+          }));
+      }
     },
     { staleTime: STALE_TIMES.token },
   );
@@ -87,9 +114,16 @@ export function useEntityToken() {
   const whitelistQuery = useEntityQuery<string[]>(
     ['entity', entityId, 'token', 'whitelist'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.transferWhitelist.entries(entityId);
-      if (!raw || !Array.isArray(raw)) return [];
-      return raw.map(([key]: [any]) => key.args[1]?.toString() ?? '');
+      if (!hasPallet(api, 'entityToken')) return [];
+      const storageFn = (api.query as any).entityToken.transferWhitelist;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw.map(([key]: [any]) => key.args[1]?.toString() ?? key.args[0]?.toString() ?? '');
+      } catch {
+        return [];
+      }
     },
     { staleTime: STALE_TIMES.token },
   );
@@ -98,11 +132,32 @@ export function useEntityToken() {
   const blacklistQuery = useEntityQuery<string[]>(
     ['entity', entityId, 'token', 'blacklist'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.transferBlacklist.entries(entityId);
-      if (!raw || !Array.isArray(raw)) return [];
-      return raw.map(([key]: [any]) => key.args[1]?.toString() ?? '');
+      if (!hasPallet(api, 'entityToken')) return [];
+      const storageFn = (api.query as any).entityToken.transferBlacklist;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw.map(([key]: [any]) => key.args[1]?.toString() ?? key.args[0]?.toString() ?? '');
+      } catch {
+        return [];
+      }
     },
     { staleTime: STALE_TIMES.token },
+  );
+
+  // Query my token balance
+  const myTokenBalanceQuery = useEntityQuery<bigint>(
+    ['entity', entityId, 'token', 'myBalance', address],
+    async (api) => {
+      if (!hasPallet(api, 'entityToken')) return BigInt(0);
+      if (!address) return BigInt(0);
+      const fn = (api.query as any).entityToken.tokenHolders ?? (api.query as any).entityToken.holders;
+      if (!fn) return BigInt(0);
+      const raw = await fn(entityId, address);
+      return BigInt(String(raw?.toString() ?? 0));
+    },
+    { staleTime: STALE_TIMES.token, enabled: !!address },
   );
 
   // ─── Mutations ──────────────────────────────────────────
@@ -140,12 +195,21 @@ export function useEntityToken() {
     invalidateKeys: [['entity', entityId, 'token', 'blacklist']],
   });
 
+  const transferTokens = useEntityMutation('entityToken', 'transfer', {
+    invalidateKeys: [
+      ['entity', entityId, 'token'],
+      ['entity', entityId, 'token', 'holders'],
+      ['entity', entityId, 'token', 'myBalance', address],
+    ],
+  });
+
   return {
     tokenConfig: tokenConfigQuery.data ?? null,
     holderCount: holderCountQuery.data ?? 0,
     holders: holdersQuery.data ?? [],
     whitelist: whitelistQuery.data ?? [],
     blacklist: blacklistQuery.data ?? [],
+    myTokenBalance: myTokenBalanceQuery.data ?? BigInt(0),
     isLoading: tokenConfigQuery.isLoading,
     error: tokenConfigQuery.error,
     mintTokens,
@@ -155,5 +219,6 @@ export function useEntityToken() {
     removeFromWhitelist,
     addToBlacklist,
     removeFromBlacklist,
+    transferTokens,
   };
 }

@@ -1,41 +1,40 @@
 'use client';
 
 import React from 'react';
+import { cn } from '@/lib/utils/cn';
+import { Button } from '@/components/ui/button';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 export interface DataUnavailableProps {
-  /** Custom message to display. Defaults to "Data temporarily unavailable" */
   message?: string;
-  /** Optional retry callback */
   onRetry?: () => void;
-  /** Additional CSS class names */
   className?: string;
 }
 
-/**
- * Reusable component for graceful degradation when external pallet queries fail.
- * Displays a non-intrusive "data unavailable" notice without affecting the rest of the page.
- *
- * Validates: Requirements 23.5
- */
-export function DataUnavailable({ message, onRetry, className = '' }: DataUnavailableProps) {
-  const displayMessage = message || 'Data temporarily unavailable';
+export function DataUnavailable({ message, onRetry, className }: DataUnavailableProps) {
+  const t = useTranslations('dataUnavailable');
+  const displayMessage = message || t('default');
 
   return (
     <div
       role="status"
       aria-live="polite"
-      className={`rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3 text-sm text-muted-foreground ${className}`.trim()}
+      className={cn(
+        'rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3 text-sm text-muted-foreground',
+        className,
+      )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span>{displayMessage}</span>
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{displayMessage}</span>
+        </div>
         {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-xs underline hover:text-foreground transition-colors"
-          >
-            Retry
-          </button>
+          <Button variant="ghost" size="sm" className="h-auto px-2 py-1 text-xs" onClick={onRetry}>
+            <RefreshCw className="mr-1 h-3 w-3" />
+            {t('retry')}
+          </Button>
         )}
       </div>
     </div>

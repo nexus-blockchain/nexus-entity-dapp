@@ -1,3 +1,4 @@
+export { cn } from './cn';
 export { hasPermission, isOwnerPermission } from './permissions';
 export { computeRenderMode } from './entity-status';
 export { computeEffectiveShopStatus } from './shop-status';

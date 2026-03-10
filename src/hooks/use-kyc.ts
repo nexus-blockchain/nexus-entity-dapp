@@ -50,7 +50,20 @@ export function useKyc() {
   const kycRecordsQuery = useEntityQuery<KycRecord[]>(
     ['entity', entityId, 'kyc'],
     async (api) => {
-      const raw = await (api.query as any).entityKyc.kycRecords.entries(entityId);
+      const pallet = (api.query as any).entityKyc;
+      if (!pallet) return [];
+      const storageFn = pallet.kycRecords;
+      if (!storageFn?.entries) return [];
+      let raw: [any, any][];
+      try {
+        raw = await storageFn.entries(entityId);
+      } catch {
+        const all = await storageFn.entries();
+        raw = (all as [any, any][]).filter(([key]: [any, any]) => {
+          const eid = Number(key.args?.[0]?.toString() ?? 0);
+          return eid === entityId;
+        });
+      }
       return parseKycEntries(raw);
     },
     { staleTime: STALE_TIMES.members },
@@ -59,7 +72,11 @@ export function useKyc() {
   const requirementQuery = useEntityQuery<{ minLevel: KycLevel; maxRiskScore: number }>(
     ['entity', entityId, 'kyc', 'requirement'],
     async (api) => {
-      const raw = await (api.query as any).entityKyc.entityRequirement(entityId);
+      const pallet = (api.query as any).entityKyc;
+      if (!pallet) return { minLevel: KycLevel.None, maxRiskScore: 100 };
+      const fn = pallet.entityRequirement;
+      if (!fn) return { minLevel: KycLevel.None, maxRiskScore: 100 };
+      const raw = await fn(entityId);
       return parseEntityRequirement(raw);
     },
     { staleTime: STALE_TIMES.members },

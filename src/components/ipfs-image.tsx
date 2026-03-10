@@ -2,6 +2,10 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { ipfsUrl } from '@/lib/utils/ipfs';
+import { cn } from '@/lib/utils/cn';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ImageOff } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 interface IpfsImageProps {
   cid: string;
@@ -16,6 +20,7 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
   const [isVisible, setIsVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const t = useTranslations('ipfs');
 
   useEffect(() => {
     const el = imgRef.current;
@@ -40,42 +45,18 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
   return (
     <div
       ref={imgRef}
-      className={className}
-      style={{ width: width ?? undefined, height: height ?? undefined, position: 'relative' }}
+      className={cn('relative overflow-hidden rounded-md', className)}
+      style={{ width: width ?? undefined, height: height ?? undefined }}
     >
       {!isVisible || (!loaded && !error) ? (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            minHeight: 48,
-            backgroundColor: '#e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 4,
-          }}
-          aria-label="Loading image"
-        >
-          <span style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</span>
-        </div>
+        <Skeleton className="absolute inset-0" />
       ) : null}
       {error ? (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            minHeight: 48,
-            backgroundColor: '#fee2e2',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 4,
-          }}
-          role="img"
-          aria-label={`Failed to load: ${alt}`}
-        >
-          <span style={{ color: '#ef4444', fontSize: 12 }}>Failed to load image</span>
+        <div className="flex h-full w-full items-center justify-center bg-muted rounded-md min-h-[48px]">
+          <div className="flex flex-col items-center gap-1">
+            <ImageOff className="h-5 w-5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{t('imageFailed')}</span>
+          </div>
         </div>
       ) : null}
       {isVisible && !error ? (
@@ -86,12 +67,10 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
           height={height}
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
-          style={{
-            display: loaded ? 'block' : 'none',
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
+          className={cn(
+            'h-full w-full object-cover',
+            !loaded && 'hidden',
+          )}
         />
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "NEXUS Entity",
+  "productName": "NEXUS-Entity",
   "version": "0.1.0",
   "identifier": "com.nexus.entity-dapp",
   "build": {
@@ -10,7 +10,6 @@
     "devUrl": "http://localhost:3000"
   },
   "app": {
-    "title": "NEXUS Entity dApp",
     "windows": [
       {
         "title": "NEXUS Entity dApp",
@@ -23,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ws: wss: https:; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' ws: wss: https:; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:"
     }
   },
   "bundle": {

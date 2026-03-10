@@ -24,8 +24,9 @@ function parseReviewEntries(rawEntries: [any, any][]): ReviewData[] {
   return rawEntries.map(([key, value]) => {
     const obj = value?.toJSON?.() ?? value;
     return {
-      id: Number(key.args?.[1]?.toString() ?? obj.id ?? 0),
-      entityId: Number(key.args?.[0]?.toString() ?? obj.entityId ?? obj.entity_id ?? 0),
+      // reviews is a StorageMap (single key = reviewId); entityId is in the value struct
+      id: Number(key.args?.[1]?.toString() ?? key.args?.[0]?.toString() ?? obj.id ?? 0),
+      entityId: Number(obj.entityId ?? obj.entity_id ?? key.args?.[0]?.toString() ?? 0),
       orderId: Number(obj.orderId ?? obj.order_id ?? 0),
       reviewer: String(obj.reviewer ?? ''),
       rating: Number(obj.rating ?? 0),
@@ -54,8 +55,14 @@ export function useReview() {
   const reviewsQuery = useEntityQuery<ReviewData[]>(
     ['entity', entityId, 'reviews'],
     async (api) => {
-      const raw = await (api.query as any).entityReview.reviews.entries(entityId);
-      return parseReviewEntries(raw);
+      const raw = await (api.query as any).entityReview.reviews.entries();
+      // reviews is a single-key StorageMap; filter by entityId client-side
+      const filtered = (raw as [any, any][]).filter(([, value]) => {
+        const obj = value?.toJSON?.() ?? value;
+        const eid = Number(obj.entityId ?? obj.entity_id ?? 0);
+        return eid === entityId;
+      });
+      return parseReviewEntries(filtered);
     },
     { staleTime: STALE_TIMES.token },
   );

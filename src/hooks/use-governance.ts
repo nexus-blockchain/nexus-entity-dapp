@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -69,7 +69,20 @@ export function useGovernance() {
   const proposalsQuery = useEntityQuery<ProposalData[]>(
     ['entity', entityId, 'proposals'],
     async (api) => {
-      const raw = await (api.query as any).entityGovernance.proposals.entries(entityId);
+      if (!hasPallet(api, 'entityGovernance')) return [];
+      const pallet = (api.query as any).entityGovernance;
+      const storageFn = pallet.proposals;
+      if (!storageFn?.entries) return [];
+      let raw: [any, any][];
+      try {
+        raw = await storageFn.entries(entityId);
+      } catch {
+        const all = await storageFn.entries();
+        raw = (all as [any, any][]).filter(([key]: [any, any]) => {
+          const eid = Number(key.args?.[0]?.toString() ?? 0);
+          return eid === entityId;
+        });
+      }
       return parseProposalEntries(raw);
     },
     { staleTime: STALE_TIMES.proposals },
@@ -78,7 +91,10 @@ export function useGovernance() {
   const proposalCountQuery = useEntityQuery<number>(
     ['entity', entityId, 'proposals', 'count'],
     async (api) => {
-      const raw = await (api.query as any).entityGovernance.proposalCount(entityId);
+      if (!hasPallet(api, 'entityGovernance')) return 0;
+      const fn = (api.query as any).entityGovernance.proposalCount;
+      if (!fn) return 0;
+      const raw = await fn(entityId);
       return Number(raw?.toString() ?? 0);
     },
     { staleTime: STALE_TIMES.proposals },
@@ -88,8 +104,11 @@ export function useGovernance() {
     useEntityQuery<VoteOption | null>(
       ['entity', entityId, 'proposals', proposalId, 'votes', account],
       async (api) => {
+        if (!hasPallet(api, 'entityGovernance')) return null;
         if (!account) return null;
-        const raw = await (api.query as any).entityGovernance.votes(entityId, proposalId, account);
+        const fn = (api.query as any).entityGovernance.votes;
+        if (!fn) return null;
+        const raw = await fn(entityId, proposalId, account);
         if (!raw || (raw as any).isNone) return null;
         const val = (raw as any).unwrapOr?.(null) ?? raw;
         return val ? (String(val) as VoteOption) : null;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -66,8 +66,23 @@ export function useMembers() {
   const membersQuery = useEntityQuery<MemberData[]>(
     ['entity', entityId, 'members'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.members.entries(entityId);
-      return parseMemberEntries(raw);
+      if (!hasPallet(api, 'entityMember')) return [];
+      const pallet = (api.query as any).entityMember;
+      const storageFn = pallet.members ?? pallet.memberOf ?? pallet.memberList;
+      if (!storageFn?.entries) return [];
+      // Try with entityId prefix first; fall back to full scan + client filter
+      try {
+        const raw = await storageFn.entries(entityId);
+        return parseMemberEntries(raw);
+      } catch {
+        const raw = await storageFn.entries();
+        const filtered = (raw as [any, any][]).filter(([key, value]) => {
+          const obj = value?.toJSON?.() ?? value;
+          const eid = Number(key.args?.[0]?.toString() ?? obj.entityId ?? obj.entity_id ?? 0);
+          return eid === entityId;
+        });
+        return parseMemberEntries(filtered);
+      }
     },
     { staleTime: STALE_TIMES.members },
   );
@@ -75,16 +90,22 @@ export function useMembers() {
   const memberCountQuery = useEntityQuery<number>(
     ['entity', entityId, 'members', 'count'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.memberCount(entityId);
+      if (!hasPallet(api, 'entityMember')) return 0;
+      const fn = (api.query as any).entityMember.memberCount;
+      if (!fn) return 0;
+      const raw = await fn(entityId);
       return Number(raw?.toString() ?? 0);
     },
     { staleTime: STALE_TIMES.members },
   );
 
-  const policyQuery = useEntityQuery<number>(
+  const policyQuery = useEntityQuery<number | null>(
     ['entity', entityId, 'members', 'policy'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.registrationPolicy(entityId);
+      if (!hasPallet(api, 'entityMember')) return null;
+      const fn = (api.query as any).entityMember.registrationPolicy;
+      if (!fn) return null;
+      const raw = await fn(entityId);
       return Number(raw?.toString() ?? 0);
     },
     { staleTime: STALE_TIMES.members },
@@ -93,8 +114,20 @@ export function useMembers() {
   const pendingQuery = useEntityQuery<string[]>(
     ['entity', entityId, 'members', 'pending'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.pendingMembers.entries(entityId);
-      return parsePendingMembers(raw);
+      if (!hasPallet(api, 'entityMember')) return [];
+      const pallet = (api.query as any).entityMember;
+      const storageFn = pallet.pendingMembers ?? pallet.pendingApprovals;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        return parsePendingMembers(raw);
+      } catch {
+        const raw = await storageFn.entries();
+        const filtered = (raw as [any, any][]).filter(([key]) => {
+          return Number(key.args?.[0]?.toString() ?? 0) === entityId;
+        });
+        return parsePendingMembers(filtered);
+      }
     },
     { staleTime: STALE_TIMES.members },
   );
@@ -104,8 +137,11 @@ export function useMembers() {
     useEntityQuery<{ directReferrals: string[]; teamSize: number }>(
       ['entity', entityId, 'members', 'referral', account],
       async (api) => {
+        if (!hasPallet(api, 'entityMember')) return { directReferrals: [], teamSize: 0 };
         if (!account) return { directReferrals: [], teamSize: 0 };
-        const raw = await (api.query as any).entityMember.referralTree(entityId, account);
+        const fn = (api.query as any).entityMember.referralTree;
+        if (!fn) return { directReferrals: [], teamSize: 0 };
+        const raw = await fn(entityId, account);
         const obj = raw?.toJSON?.() ?? raw;
         return {
           directReferrals: Array.isArray(obj?.directReferrals ?? obj?.direct_referrals)
@@ -121,8 +157,20 @@ export function useMembers() {
   const customLevelsQuery = useEntityQuery<CustomLevel[]>(
     ['entity', entityId, 'members', 'levels'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.customLevels.entries(entityId);
-      return parseCustomLevels(raw);
+      if (!hasPallet(api, 'entityMember')) return [];
+      const pallet = (api.query as any).entityMember;
+      const storageFn = pallet.customLevels ?? pallet.levels;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        return parseCustomLevels(raw);
+      } catch {
+        const raw = await storageFn.entries();
+        const filtered = (raw as [any, any][]).filter(([key]) => {
+          return Number(key.args?.[0]?.toString() ?? 0) === entityId;
+        });
+        return parseCustomLevels(filtered);
+      }
     },
     { staleTime: STALE_TIMES.members },
   );
@@ -131,8 +179,20 @@ export function useMembers() {
   const upgradeTriggersQuery = useEntityQuery<{ trigger: UpgradeTrigger; value: bigint }[]>(
     ['entity', entityId, 'members', 'triggers'],
     async (api) => {
-      const raw = await (api.query as any).entityMember.upgradeTriggers.entries(entityId);
-      return parseUpgradeTriggers(raw);
+      if (!hasPallet(api, 'entityMember')) return [];
+      const pallet = (api.query as any).entityMember;
+      const storageFn = pallet.upgradeTriggers ?? pallet.levelTriggers;
+      if (!storageFn?.entries) return [];
+      try {
+        const raw = await storageFn.entries(entityId);
+        return parseUpgradeTriggers(raw);
+      } catch {
+        const raw = await storageFn.entries();
+        const filtered = (raw as [any, any][]).filter(([key]) => {
+          return Number(key.args?.[0]?.toString() ?? 0) === entityId;
+        });
+        return parseUpgradeTriggers(filtered);
+      }
     },
     { staleTime: STALE_TIMES.members },
   );

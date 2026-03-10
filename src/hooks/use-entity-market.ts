@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -13,8 +13,8 @@ function parseMarketOrders(rawEntries: [any, any][]): MarketOrder[] {
   return rawEntries.map(([key, value]) => {
     const obj = value?.toJSON?.() ?? value;
     return {
-      id: Number(key.args?.[1]?.toString() ?? obj.id ?? 0),
-      entityId: Number(key.args?.[0]?.toString() ?? obj.entityId ?? 0),
+      id: Number(key.args?.[1]?.toString() ?? key.args?.[0]?.toString() ?? obj.id ?? 0),
+      entityId: Number(obj.entityId ?? obj.entity_id ?? key.args?.[0]?.toString() ?? 0),
       trader: String(obj.trader ?? ''),
       side: String(obj.side ?? 'Buy') as 'Buy' | 'Sell',
       price: BigInt(String(obj.price ?? 0)),
@@ -65,8 +65,19 @@ export function useEntityMarket() {
   const orderBookQuery = useEntityQuery<MarketOrder[]>(
     ['entity', entityId, 'market', 'orderBook'],
     async (api) => {
-      const raw = await (api.query as any).entityMarket.orderBook.entries(entityId);
-      return parseMarketOrders(raw);
+      if (!hasPallet(api, 'entityMarket')) return [];
+      const pallet = (api.query as any).entityMarket;
+      // Try known storage names: orderBook, orders, sellOrders
+      const storageFn = pallet.orderBook ?? pallet.orders ?? pallet.sellOrders;
+      if (!storageFn?.entries) return [];
+      const raw = await storageFn.entries();
+      // Single-key StorageMap; filter by entityId client-side
+      const filtered = (raw as [any, any][]).filter(([, value]) => {
+        const obj = value?.toJSON?.() ?? value;
+        const eid = Number(obj.entityId ?? obj.entity_id ?? 0);
+        return eid === entityId;
+      });
+      return parseMarketOrders(filtered);
     },
     { staleTime: STALE_TIMES.orderBook },
   );
@@ -75,7 +86,10 @@ export function useEntityMarket() {
   const statsQuery = useEntityQuery<MarketStats | null>(
     ['entity', entityId, 'market', 'stats'],
     async (api) => {
-      const raw = await (api.query as any).entityMarket.marketStats(entityId);
+      if (!hasPallet(api, 'entityMarket')) return null;
+      const fn = (api.query as any).entityMarket.marketStats;
+      if (!fn) return null;
+      const raw = await fn(entityId);
       return parseMarketStats(raw);
     },
     { staleTime: STALE_TIMES.token },
@@ -85,7 +99,10 @@ export function useEntityMarket() {
   const priceProtectionQuery = useEntityQuery<PriceProtectionConfig | null>(
     ['entity', entityId, 'market', 'priceProtection'],
     async (api) => {
-      const raw = await (api.query as any).entityMarket.priceProtectionConfig(entityId);
+      if (!hasPallet(api, 'entityMarket')) return null;
+      const fn = (api.query as any).entityMarket.priceProtectionConfig;
+      if (!fn) return null;
+      const raw = await fn(entityId);
       return parsePriceProtectionConfig(raw);
     },
     { staleTime: STALE_TIMES.token },

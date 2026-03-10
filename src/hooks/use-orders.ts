@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useWalletStore } from '@/stores/wallet-store';
@@ -39,6 +39,7 @@ export function useShopOrders(shopId: number) {
   const orderIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'shop', shopId, 'orders'],
     async (api) => {
+      if (!hasPallet(api, 'entityOrder')) return [];
       const raw = await (api.query as any).entityOrder.shopOrders(shopId);
       if (!raw) return [];
       const arr = raw.toJSON?.() ?? raw;
@@ -50,6 +51,7 @@ export function useShopOrders(shopId: number) {
   const ordersQuery = useEntityQuery<OrderData[]>(
     ['entity', entityId, 'shop', shopId, 'orders', 'data', orderIdsQuery.data],
     async (api) => {
+      if (!hasPallet(api, 'entityOrder')) return [];
       const ids = orderIdsQuery.data;
       if (!ids || ids.length === 0) return [];
       const results = await Promise.all(
@@ -111,6 +113,7 @@ export function useBuyerOrders() {
   const orderIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'orders', address],
     async (api) => {
+      if (!hasPallet(api, 'entityOrder')) return [];
       if (!address) return [];
       const raw = await (api.query as any).entityOrder.buyerOrders(address);
       if (!raw) return [];
@@ -123,6 +126,7 @@ export function useBuyerOrders() {
   const ordersQuery = useEntityQuery<OrderData[]>(
     ['entity', entityId, 'orders', address, 'data', orderIdsQuery.data],
     async (api) => {
+      if (!hasPallet(api, 'entityOrder')) return [];
       const ids = orderIdsQuery.data;
       if (!ids || ids.length === 0) return [];
       const results = await Promise.all(

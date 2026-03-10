@@ -1,6 +1,6 @@
 'use client';
 
-import { useEntityQuery } from './use-entity-query';
+import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
@@ -72,7 +72,20 @@ export function useTokensale() {
   const saleRoundsQuery = useEntityQuery<SaleRound[]>(
     ['entity', entityId, 'tokensale'],
     async (api) => {
-      const raw = await (api.query as any).entityTokensale.saleRounds.entries(entityId);
+      if (!hasPallet(api, 'entityTokensale')) return [];
+      const pallet = (api.query as any).entityTokensale;
+      const storageFn = pallet.saleRounds;
+      if (!storageFn?.entries) return [];
+      let raw: [any, any][];
+      try {
+        raw = await storageFn.entries(entityId);
+      } catch {
+        const all = await storageFn.entries();
+        raw = (all as [any, any][]).filter(([key]: [any, any]) => {
+          const eid = Number(key.args?.[0]?.toString() ?? 0);
+          return eid === entityId;
+        });
+      }
       return parseSaleRoundEntries(raw);
     },
     { staleTime: STALE_TIMES.token },
@@ -82,8 +95,11 @@ export function useTokensale() {
     useEntityQuery<{ amount: bigint; claimed: boolean } | null>(
       ['entity', entityId, 'tokensale', roundId, 'subscriptions', account],
       async (api) => {
+        if (!hasPallet(api, 'entityTokensale')) return null;
         if (!account) return null;
-        const raw = await (api.query as any).entityTokensale.subscriptions(entityId, roundId, account);
+        const fn = (api.query as any).entityTokensale.subscriptions;
+        if (!fn) return null;
+        const raw = await fn(entityId, roundId, account);
         if (!raw || (raw as any).isNone) return null;
         const obj = (raw as any).unwrapOr?.(null) ?? raw;
         if (!obj) return null;
@@ -100,7 +116,21 @@ export function useTokensale() {
     useEntityQuery<string[]>(
       ['entity', entityId, 'tokensale', roundId, 'whitelist'],
       async (api) => {
-        const raw = await (api.query as any).entityTokensale.whitelists.entries(entityId, roundId);
+        if (!hasPallet(api, 'entityTokensale')) return [];
+        const pallet = (api.query as any).entityTokensale;
+        const whitelistFn = pallet.whitelists;
+        if (!whitelistFn?.entries) return [];
+        let raw: [any, any][];
+        try {
+          raw = await whitelistFn.entries(entityId, roundId);
+        } catch {
+          const all = await whitelistFn.entries();
+          raw = (all as [any, any][]).filter(([key]: [any, any]) => {
+            const eid = Number(key.args?.[0]?.toString() ?? 0);
+            const rid = Number(key.args?.[1]?.toString() ?? 0);
+            return eid === entityId && rid === roundId;
+          });
+        }
         return parseWhitelistEntries(raw);
       },
       { staleTime: STALE_TIMES.token },

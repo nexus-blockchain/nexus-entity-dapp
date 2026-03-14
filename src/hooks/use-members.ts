@@ -200,8 +200,8 @@ export function useMembers() {
   // ─── Mutations ──────────────────────────────────────────
 
   const registerMember = useEntityMutation('entityMember', 'registerMember', { invalidateKeys });
-  const freezeMember = useEntityMutation('entityMember', 'freezeMember', { invalidateKeys });
-  const unfreezeMember = useEntityMutation('entityMember', 'unfreezeMember', { invalidateKeys });
+  const freezeMember = useEntityMutation('entityMember', 'deactivateMember', { invalidateKeys });
+  const unfreezeMember = useEntityMutation('entityMember', 'activateMember', { invalidateKeys });
   const banMember = useEntityMutation('entityMember', 'banMember', {
     invalidateKeys,
     confirmDialog: { title: '确认封禁', description: '封禁后该会员将无法参与任何实体活动，确定继续？', severity: 'danger' },
@@ -213,14 +213,14 @@ export function useMembers() {
   });
   const approveMember = useEntityMutation('entityMember', 'approveMember', { invalidateKeys });
   const rejectMember = useEntityMutation('entityMember', 'rejectMember', { invalidateKeys });
-  const setRegistrationPolicy = useEntityMutation('entityMember', 'setRegistrationPolicy', { invalidateKeys });
+  const setRegistrationPolicy = useEntityMutation('entityMember', 'setMemberPolicy', { invalidateKeys });
 
   // Level mutations
-  const initializeLevels = useEntityMutation('entityMember', 'initializeLevels', { invalidateKeys });
+  const initializeLevels = useEntityMutation('entityMember', 'initLevelSystem', { invalidateKeys });
   const addCustomLevel = useEntityMutation('entityMember', 'addCustomLevel', { invalidateKeys });
   const updateCustomLevel = useEntityMutation('entityMember', 'updateCustomLevel', { invalidateKeys });
-  const deleteCustomLevel = useEntityMutation('entityMember', 'deleteCustomLevel', { invalidateKeys });
-  const setUpgradeTrigger = useEntityMutation('entityMember', 'setUpgradeTrigger', { invalidateKeys });
+  const deleteCustomLevel = useEntityMutation('entityMember', 'removeCustomLevel', { invalidateKeys });
+  const setUpgradeTrigger = useEntityMutation('entityMember', 'setUpgradeMode', { invalidateKeys });
 
   return {
     // Query data

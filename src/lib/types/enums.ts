@@ -186,6 +186,13 @@ export enum InsiderRole {
   MajorHolder = 'MajorHolder',
 }
 
+// 团队业绩阈值模式
+export enum SalesThresholdMode {
+  PersonalOnly = 'PersonalOnly',
+  TeamTotal = 'TeamTotal',
+  WeightedMix = 'WeightedMix',
+}
+
 // 佣金插件模式 - 6 种
 export enum CommissionPlugin {
   Referral = 'Referral',

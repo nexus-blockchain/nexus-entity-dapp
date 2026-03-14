@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useShops } from '@/hooks/use-shops';
 import { PermissionGuard } from '@/components/permission-guard';
@@ -84,16 +85,20 @@ function ShopsLoadingSkeleton() {
 
 // ─── Shop Card ──────────────────────────────────────────────
 
-function ShopCard({ shop, onTopUp }: { shop: ShopData; onTopUp: (shopId: number) => void }) {
+function ShopCard({ shop, entityId, onTopUp }: { shop: ShopData; entityId: number; onTopUp: (shopId: number) => void }) {
   const t = useTranslations('shops');
   const te = useTranslations('enums');
+  const router = useRouter();
   const badgeCfg = STATUS_BADGE_VARIANT[shop.effectiveStatus];
   const showFundWarning =
     shop.effectiveStatus === EffectiveShopStatus.FundDepleted ||
     isFundWarning(shop.fundBalance, FUND_WARNING_THRESHOLD);
 
   return (
-    <Card>
+    <Card
+      className="cursor-pointer transition-colors hover:bg-accent/50"
+      onClick={() => router.push(`/${entityId}/shops/${shop.id}`)}
+    >
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
         <div className="space-y-1">
           <CardTitle className="text-base">{shop.name}</CardTitle>
@@ -120,7 +125,7 @@ function ShopCard({ shop, onTopUp }: { shop: ShopData; onTopUp: (shopId: number)
               variant="destructive"
               size="sm"
               className="ml-2 h-7 text-xs"
-              onClick={() => onTopUp(shop.id)}
+              onClick={(e) => { e.stopPropagation(); onTopUp(shop.id); }}
             >
               {t('quickTopUp')}
             </Button>
@@ -300,7 +305,7 @@ function TopUpDialog({
 export function ShopsPage() {
   const t = useTranslations('shops');
   const tc = useTranslations('common');
-  const { isReadOnly, isSuspended } = useEntityContext();
+  const { isReadOnly, isSuspended, entityId } = useEntityContext();
   const { shops, isLoading, error } = useShops();
   const [topUpShopId, setTopUpShopId] = useState<number | null>(null);
 
@@ -337,7 +342,7 @@ export function ShopsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {shops.map((shop) => (
-            <ShopCard key={shop.id} shop={shop} onTopUp={setTopUpShopId} />
+            <ShopCard key={shop.id} shop={shop} entityId={entityId} onTopUp={setTopUpShopId} />
           ))}
         </div>
       )}

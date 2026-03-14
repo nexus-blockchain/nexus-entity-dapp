@@ -14,6 +14,12 @@ import {
 } from './peer-discovery';
 import { useNodeHealthStore } from '@/stores/node-health-store';
 
+// Global API reference accessible outside React tree (e.g. desktop-keyring signer)
+let _globalApi: ApiPromise | null = null;
+export function getGlobalApi(): ApiPromise | null {
+  return _globalApi;
+}
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface ApiContextValue {
@@ -135,6 +141,7 @@ export function ApiProvider({
         .then((apiInstance) =>
           apiInstance.isReady.then(() => {
             apiRef.current = apiInstance;
+            _globalApi = apiInstance;
             setApi(apiInstance);
             setIsReady(true);
             setConnectionStatus('connected');

@@ -16,9 +16,9 @@ export interface PermissionGuardProps {
  * otherwise renders fallback content or a default "permission denied" message.
  */
 export function PermissionGuard({ required, fallback, children }: PermissionGuardProps) {
-  const { permissions } = useEntityContext();
+  const { permissions, isOwner } = useEntityContext();
 
-  if (hasPermission(permissions, required)) {
+  if (isOwner || hasPermission(permissions, required)) {
     return <>{children}</>;
   }
 
@@ -38,6 +38,6 @@ export function PermissionGuard({ required, fallback, children }: PermissionGuar
  * Returns true if the current user has the required permission bits.
  */
 export function useHasPermission(required: number): boolean {
-  const { permissions } = useEntityContext();
-  return hasPermission(permissions, required);
+  const { permissions, isOwner } = useEntityContext();
+  return isOwner || hasPermission(permissions, required);
 }

@@ -15,6 +15,7 @@ import {
   KycLevel,
   KycStatus,
   CommissionPlugin,
+  SalesThresholdMode,
   TxStatus,
   RenderMode,
 } from './enums';
@@ -214,6 +215,147 @@ export interface CommissionConfig {
   enabledModes: number;
   withdrawalConfig: WithdrawalConfig;
   withdrawalPaused: boolean;
+}
+
+// 多级佣金层级
+export interface MultiLevelTier {
+  rate: number;
+  minSales: bigint;
+}
+
+// 多级佣金配置
+export interface MultiLevelConfig {
+  tiers: MultiLevelTier[];
+  maxTotalRate: number;
+}
+
+// 多级佣金统计
+export interface MultiLevelStats {
+  totalMembers: number;
+  totalDistributed: bigint;
+  maxDepthReached: number;
+}
+
+// 会员关系
+export interface MemberRelation {
+  parent: string | null;
+  depth: number;
+  directReferrals: number;
+}
+
+// 推荐佣金配置
+export interface ReferralConfig {
+  enabled: boolean;
+  rewardRate: number;
+}
+
+// 推荐佣金统计
+export interface ReferralStats {
+  totalReferrals: number;
+  totalRewardDistributed: bigint;
+  activeReferrers: number;
+}
+
+// 推荐人记录
+export interface ReferrerRecord {
+  referrer: string | null;
+  totalReferred: number;
+  totalEarned: bigint;
+}
+
+// 级差佣金配置
+export interface LevelDiffConfig {
+  levelRates: number[];
+  maxDepth: number;
+}
+
+// 级差佣金统计
+export interface LevelDiffStats {
+  totalDistributed: bigint;
+  activeLevels: number;
+  maxLevelReached: number;
+}
+
+// 单线佣金配置
+export interface SingleLineConfig {
+  enabled: boolean;
+  uplineRate: number;
+  downlineRate: number;
+  baseUplineLevels: number;
+  baseDownlineLevels: number;
+  levelIncrementThreshold: bigint;
+  maxUplineLevels: number;
+  maxDownlineLevels: number;
+}
+
+// 单线佣金统计
+export interface SingleLineStats {
+  totalDistributed: bigint;
+  totalLines: number;
+  avgLineDepth: number;
+}
+
+// 单线位置
+export interface SingleLinePosition {
+  position: number;
+  upline: string | null;
+  downlineCount: number;
+}
+
+// 团队佣金配置
+export interface TeamConfig {
+  enabled: boolean;
+  tiers: TeamTier[];
+  maxDepth: number;
+  allowStacking: boolean;
+  thresholdMode: SalesThresholdMode;
+}
+
+// 团队层级
+export interface TeamTier {
+  tier: number;
+  rate: number;
+  minTeamPerformance: bigint;
+  minDirectCount: number;
+}
+
+// 团队佣金统计
+export interface TeamStats {
+  totalDistributed: bigint;
+  totalTeams: number;
+  activeTeamLeaders: number;
+}
+
+// 团队信息
+export interface TeamInfo {
+  leader: string;
+  teamSize: number;
+  teamPerformance: bigint;
+  currentTier: number;
+  directCount: number;
+}
+
+// 奖池佣金配置
+export interface PoolRewardConfig {
+  enabled: boolean;
+  levelRatios: [number, number][];
+  roundDuration: number;
+}
+
+// 奖池佣金统计
+export interface PoolRewardStats {
+  poolBalance: bigint;
+  totalDistributed: bigint;
+  totalParticipants: number;
+  lastDistributionBlock: number;
+}
+
+// 奖池参与者
+export interface PoolParticipant {
+  account: string;
+  contribution: bigint;
+  share: number;
+  totalClaimed: bigint;
 }
 
 // KYC 记录

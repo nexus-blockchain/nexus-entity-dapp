@@ -207,12 +207,27 @@ export function DesktopWalletDialog() {
     setLoading(true);
     try {
       const dk = await import('@/lib/wallet/desktop-keyring');
-      const { address } = await dk.importAccount(importMnemonic.trim(), importName.trim(), importPassword);
+      const pwd = importPassword;
+      const { address } = await dk.importAccount(importMnemonic.trim(), importName.trim(), pwd);
       setSuccess(t('accountImported', { address: `${address.slice(0, 8)}...${address.slice(-6)}` }));
       resetImportForm();
       await loadAccounts();
+
+      // Auto unlock & connect, then close dialog
+      try {
+        await unlockDesktopAccount(address, pwd);
+        const accs = await getAccounts();
+        const account = accs.find((a) => a.address === address);
+        if (account) {
+          await connect(account);
+        }
+        setTimeout(() => setOpen(false), 800);
+      } catch {
+        // unlock failed — dialog stays open so user can manually unlock
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('importFailed'));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg === 'Invalid mnemonic phrase' ? t('invalidMnemonic') : t('importFailed'));
     } finally {
       setLoading(false);
     }

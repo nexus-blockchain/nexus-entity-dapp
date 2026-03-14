@@ -10,6 +10,7 @@ import { AdminPermission } from '@/lib/types/models';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { NodeHealthIndicator } from '@/components/node-health-indicator';
 import { useWallet } from '@/hooks/use-wallet';
+import { useNexBalance } from '@/hooks/use-external-queries';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityToken } from '@/hooks/use-entity-token';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
@@ -47,6 +48,7 @@ import {
   Home,
   Send,
   Loader2,
+  Globe,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -182,11 +184,13 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
     address,
     name: walletName,
     isConnected,
-    balance,
     getAccounts,
     connect,
     disconnect,
   } = useWallet();
+
+  const { data: nexBalance } = useNexBalance(address);
+  const balance = nexBalance?.free ?? BigInt(0);
 
   // Wallet connect state
   const [loading, setLoading] = useState(false);
@@ -200,7 +204,9 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
   const [transferTo, setTransferTo] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
 
-  const nexTransfer = useEntityMutation('balances', 'transferKeepAlive', {});
+  const nexTransfer = useEntityMutation('balances', 'transferKeepAlive', {
+    invalidateKeys: [['external', 'balances', address]],
+  });
   const { tokenConfig, myTokenBalance, transferTokens } = useEntityToken();
   const { entityId } = useEntityContext();
 
@@ -280,17 +286,7 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            {isTauri() ? (
-              <div className="flex justify-center"><DesktopWalletDialog /></div>
-            ) : (
-              <button
-                onClick={handleConnect}
-                disabled={loading}
-                className="flex w-full justify-center rounded-md py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
-              </button>
-            )}
+            <div className="flex justify-center"><DesktopWalletDialog /></div>
           </TooltipTrigger>
           <TooltipContent side="right">{tc('connectWallet')}</TooltipContent>
         </Tooltip>
@@ -335,14 +331,10 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
   if (!isConnected) {
     return (
       <div className="space-y-2 px-1">
-        {isTauri() ? (
+        <DesktopWalletDialog />
+        {!isTauri() && (
           <>
-            <DesktopWalletDialog />
-            <p className="text-[10px] text-muted-foreground px-1">{tw('desktopWalletDesc')}</p>
-          </>
-        ) : (
-          <>
-            <Button onClick={handleConnect} disabled={loading} size="sm" className="w-full">
+            <Button variant="outline" onClick={handleConnect} disabled={loading} size="sm" className="w-full">
               {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wallet className="mr-1.5 h-3.5 w-3.5" />}
               {tc('connectWallet')}
             </Button>
@@ -364,7 +356,6 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
             {error && (
               <p className="text-[10px] text-destructive px-1">{error}</p>
             )}
-            <p className="text-[10px] text-muted-foreground px-1">{tw('supportedWallets')}</p>
           </>
         )}
       </div>
@@ -402,8 +393,8 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
         </button>
       </div>
 
-      {/* Tauri: desktop wallet management */}
-      {isTauri() && <DesktopWalletDialog />}
+      {/* Wallet management */}
+      <DesktopWalletDialog />
 
       {/* Transfer toggle */}
       <Button
@@ -626,6 +617,29 @@ export function EntitySidebar() {
 
           {/* Wallet panel: connect / info / transfer */}
           <SidebarWalletPanel collapsed={sidebarCollapsed} />
+
+          {/* All Entities link */}
+          {sidebarCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  href="/"
+                  className="flex w-full justify-center rounded-md py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                >
+                  <Globe className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">{t('allEntities')}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Link
+              href="/"
+              className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {t('allEntities')}
+            </Link>
+          )}
 
           {!sidebarCollapsed && (
             <div className="px-2">

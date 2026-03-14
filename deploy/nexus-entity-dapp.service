@@ -1,0 +1,15 @@
+[Unit]
+Description=NEXUS Entity dApp
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nexus-entity-dapp
+ExecStart=/usr/bin/npx serve /root/nexus-entity-dapp/out -s -l 3001
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

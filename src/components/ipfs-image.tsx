@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { ipfsUrl } from '@/lib/utils/ipfs';
 import { cn } from '@/lib/utils/cn';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ImageOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useIpfsGatewayStore } from '@/stores/ipfs-gateway-store';
 
 interface IpfsImageProps {
   cid: string;
@@ -20,7 +21,10 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
   const [isVisible, setIsVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const [gatewayIdx, setGatewayIdx] = useState(0);
   const t = useTranslations('ipfs');
+
+  const orderedGateways = useIpfsGatewayStore((s) => s.getOrderedGateways);
 
   useEffect(() => {
     const el = imgRef.current;
@@ -40,7 +44,27 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
     return () => observer.disconnect();
   }, []);
 
-  const src = ipfsUrl(cid);
+  // Reset state when CID changes
+  useEffect(() => {
+    setGatewayIdx(0);
+    setLoaded(false);
+    setError(false);
+  }, [cid]);
+
+  const gateways = orderedGateways();
+  const src = gatewayIdx < gateways.length
+    ? ipfsUrl(cid, gateways[gatewayIdx])
+    : null;
+
+  const handleError = useCallback(() => {
+    const nextIdx = gatewayIdx + 1;
+    if (nextIdx < gateways.length) {
+      setGatewayIdx(nextIdx);
+      setLoaded(false);
+    } else {
+      setError(true);
+    }
+  }, [gatewayIdx, gateways.length]);
 
   return (
     <div
@@ -59,14 +83,14 @@ export function IpfsImage({ cid, alt, className, width, height }: IpfsImageProps
           </div>
         </div>
       ) : null}
-      {isVisible && !error ? (
+      {isVisible && !error && src ? (
         <img
           src={src}
           alt={alt}
           width={width}
           height={height}
           onLoad={() => setLoaded(true)}
-          onError={() => setError(true)}
+          onError={handleError}
           className={cn(
             'h-full w-full object-cover',
             !loaded && 'hidden',

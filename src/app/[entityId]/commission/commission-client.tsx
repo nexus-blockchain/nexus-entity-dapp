@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
@@ -10,7 +11,6 @@ import { useCommission } from '@/hooks/use-commission';
 import { useWalletStore } from '@/stores/wallet-store';
 
 import { useTranslations } from 'next-intl';
-import { cn } from '@/lib/utils/cn';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,13 +28,13 @@ function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
 }
 
-const PLUGIN_LIST: { key: CommissionPlugin; bit: number }[] = [
-  { key: CommissionPlugin.Referral, bit: 0x001 },
-  { key: CommissionPlugin.MultiLevel, bit: 0x002 },
-  { key: CommissionPlugin.LevelDiff, bit: 0x008 },
-  { key: CommissionPlugin.SingleLine, bit: 0x080 },
-  { key: CommissionPlugin.Team, bit: 0x004 },
-  { key: CommissionPlugin.PoolReward, bit: 0x200 },
+const PLUGIN_LIST: { key: CommissionPlugin; bit: number; route: string }[] = [
+  { key: CommissionPlugin.Referral, bit: 0x001, route: 'referral' },
+  { key: CommissionPlugin.MultiLevel, bit: 0x002, route: 'multilevel' },
+  { key: CommissionPlugin.LevelDiff, bit: 0x008, route: 'leveldiff' },
+  { key: CommissionPlugin.SingleLine, bit: 0x080, route: 'singleline' },
+  { key: CommissionPlugin.Team, bit: 0x004, route: 'team' },
+  { key: CommissionPlugin.PoolReward, bit: 0x200, route: 'poolreward' },
 ];
 
 // ─── Loading Skeleton ───────────────────────────────────────
@@ -177,21 +177,18 @@ function OverviewSection() {
 
 function PluginSection() {
   const t = useTranslations('commission');
+  const tc = useTranslations('common');
   const te = useTranslations('enums');
   const { entityId } = useEntityContext();
-  const { config, enablePlugin, disablePlugin } = useCommission();
+  const { config, setCommissionModes } = useCommission();
   const enabledModes = config?.enabledModes ?? 0;
 
   const handleToggle = useCallback(
-    (plugin: CommissionPlugin, bit: number) => {
-      const isEnabled = (enabledModes & bit) !== 0;
-      if (isEnabled) {
-        disablePlugin.mutate([entityId, plugin]);
-      } else {
-        enablePlugin.mutate([entityId, plugin]);
-      }
+    (_plugin: CommissionPlugin, bit: number) => {
+      const newModes = enabledModes ^ bit;
+      setCommissionModes.mutate([entityId, newModes]);
     },
-    [entityId, enabledModes, enablePlugin, disablePlugin],
+    [entityId, enabledModes, setCommissionModes],
   );
 
   return (
@@ -202,7 +199,7 @@ function PluginSection() {
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {PLUGIN_LIST.map(({ key, bit }) => {
+          {PLUGIN_LIST.map(({ key, bit, route }) => {
             const isEnabled = (enabledModes & bit) !== 0;
             return (
               <Card key={key} className="shadow-none">
@@ -211,11 +208,18 @@ function PluginSection() {
                     <p className="text-sm font-medium">{te(`commissionPlugin.${key}`)}</p>
                     <p className="text-xs text-muted-foreground">{key}</p>
                   </div>
-                  <Switch
-                    checked={isEnabled}
-                    onCheckedChange={() => handleToggle(key, bit)}
-                    disabled={isTxBusy(enablePlugin) || isTxBusy(disablePlugin)}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Link href={`/${entityId}/commission/${route}`}>
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                        {tc('viewDetails')}
+                      </Button>
+                    </Link>
+                    <Switch
+                      checked={isEnabled}
+                      onCheckedChange={() => handleToggle(key, bit)}
+                      disabled={isTxBusy(setCommissionModes)}
+                    />
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -223,8 +227,7 @@ function PluginSection() {
         </div>
       </CardContent>
       <CardFooter className="gap-3">
-        <TxStatusIndicator txState={enablePlugin.txState} />
-        <TxStatusIndicator txState={disablePlugin.txState} />
+        <TxStatusIndicator txState={setCommissionModes.txState} />
       </CardFooter>
     </Card>
   );
@@ -235,22 +238,30 @@ function PluginSection() {
 function WithdrawalSection() {
   const t = useTranslations('commission');
   const { entityId } = useEntityContext();
-  const { config, configureWithdrawal, pauseWithdrawal, resumeWithdrawal } = useCommission();
+  const { config, configureWithdrawal, pauseWithdrawal } = useCommission();
 
-  const [minAmount, setMinAmount] = useState('');
-  const [feeRate, setFeeRate] = useState('');
-  const [cooldown, setCooldown] = useState('');
+  const [mode, setMode] = useState('');
+  const [defaultTier, setDefaultTier] = useState('');
+  const [voluntaryBonusRate, setVoluntaryBonusRate] = useState('');
+  const [enabled, setEnabled] = useState(true);
 
   const handleConfigure = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!minAmount.trim() || !feeRate.trim() || !cooldown.trim()) return;
-      configureWithdrawal.mutate([entityId, minAmount.trim(), Number(feeRate), Number(cooldown)]);
-      setMinAmount('');
-      setFeeRate('');
-      setCooldown('');
+      // setWithdrawalConfig(entityId, mode, defaultTier, levelOverrides, voluntaryBonusRate, enabled)
+      configureWithdrawal.mutate([
+        entityId,
+        mode.trim() || 'Standard',
+        Number(defaultTier) || 0,
+        null, // levelOverrides — pass null for no overrides
+        Number(voluntaryBonusRate) || 0,
+        enabled,
+      ]);
+      setMode('');
+      setDefaultTier('');
+      setVoluntaryBonusRate('');
     },
-    [entityId, minAmount, feeRate, cooldown, configureWithdrawal],
+    [entityId, mode, defaultTier, voluntaryBonusRate, enabled, configureWithdrawal],
   );
 
   const wc = config?.withdrawalConfig;
@@ -293,37 +304,46 @@ function WithdrawalSection() {
         <Separator />
 
         <form onSubmit={handleConfigure} className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="space-y-2">
-              <Label htmlFor="min-amount">{t('minWithdrawal')}</Label>
+              <Label htmlFor="wd-mode">{t('withdrawalMode')}</Label>
               <Input
-                id="min-amount"
+                id="wd-mode"
                 type="text"
-                inputMode="decimal"
-                value={minAmount}
-                onChange={(e) => setMinAmount(e.target.value)}
-                placeholder={t('minWithdrawal')}
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                placeholder="Standard"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="fee-rate">{t('feeRate')}</Label>
+              <Label htmlFor="wd-default-tier">{t('defaultTier')}</Label>
               <Input
-                id="fee-rate"
+                id="wd-default-tier"
                 type="number"
-                value={feeRate}
-                onChange={(e) => setFeeRate(e.target.value)}
-                placeholder={t('feeRate')}
+                value={defaultTier}
+                onChange={(e) => setDefaultTier(e.target.value)}
+                placeholder="0"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cooldown">{t('cooldownPeriod')}</Label>
+              <Label htmlFor="wd-bonus-rate">{t('voluntaryBonusRate')}</Label>
               <Input
-                id="cooldown"
+                id="wd-bonus-rate"
                 type="number"
-                value={cooldown}
-                onChange={(e) => setCooldown(e.target.value)}
-                placeholder={t('cooldownPeriod')}
+                value={voluntaryBonusRate}
+                onChange={(e) => setVoluntaryBonusRate(e.target.value)}
+                placeholder="0"
               />
+            </div>
+            <div className="flex items-end space-y-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="wd-enabled"
+                  checked={enabled}
+                  onCheckedChange={setEnabled}
+                />
+                <Label htmlFor="wd-enabled">{t('enabled')}</Label>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -333,18 +353,13 @@ function WithdrawalSection() {
             <Button
               type="button"
               variant={config?.withdrawalPaused ? 'default' : 'destructive'}
-              onClick={() =>
-                config?.withdrawalPaused
-                  ? resumeWithdrawal.mutate([entityId])
-                  : pauseWithdrawal.mutate([entityId])
-              }
-              disabled={isTxBusy(pauseWithdrawal) || isTxBusy(resumeWithdrawal)}
+              onClick={() => pauseWithdrawal.mutate([entityId, !config?.withdrawalPaused])}
+              disabled={isTxBusy(pauseWithdrawal)}
             >
               {config?.withdrawalPaused ? t('resumeWithdrawal') : t('pauseWithdrawal')}
             </Button>
             <TxStatusIndicator txState={configureWithdrawal.txState} />
             <TxStatusIndicator txState={pauseWithdrawal.txState} />
-            <TxStatusIndicator txState={resumeWithdrawal.txState} />
           </div>
         </form>
       </CardContent>
@@ -366,7 +381,8 @@ function WithdrawSection() {
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!nexAmount.trim()) return;
-      withdrawNex.mutate([entityId, nexAmount.trim()]);
+      // withdrawCommission(entityId, amount?, repurchaseRate?, repurchaseTarget?)
+      withdrawNex.mutate([entityId, nexAmount.trim(), null, null]);
       setNexAmount('');
     },
     [entityId, nexAmount, withdrawNex],
@@ -376,7 +392,8 @@ function WithdrawSection() {
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!tokenAmount.trim()) return;
-      withdrawToken.mutate([entityId, tokenAmount.trim()]);
+      // withdrawTokenCommission(entityId, amount?, repurchaseRate?, repurchaseTarget?)
+      withdrawToken.mutate([entityId, tokenAmount.trim(), null, null]);
       setTokenAmount('');
     },
     [entityId, tokenAmount, withdrawToken],

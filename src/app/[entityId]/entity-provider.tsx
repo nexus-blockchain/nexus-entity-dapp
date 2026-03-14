@@ -4,7 +4,6 @@ import React, { createContext, useContext, useEffect, useMemo } from 'react';
 import type { EntityContext, EntityData } from '@/lib/types/models';
 import { EntityStatus, EntityType, GovernanceMode } from '@/lib/types/enums';
 import { useEntityQuery } from '@/hooks/use-entity-query';
-import { isOwnerPermission } from '@/lib/utils/permissions';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
@@ -81,8 +80,8 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
   );
 
   const isOwner = useMemo(
-    () => isOwnerPermission(permissions ?? 0),
-    [permissions],
+    () => !!walletAddress && !!entity && entity.owner === walletAddress,
+    [walletAddress, entity],
   );
 
   const isReadOnly = useMemo(() => {

@@ -112,13 +112,12 @@ export function useCommission() {
   // ─── Mutations ──────────────────────────────────────────
 
   const setCommissionRate = useEntityMutation('commissionCore', 'setCommissionRate', { invalidateKeys });
-  const enablePlugin = useEntityMutation('commissionCore', 'enablePlugin', { invalidateKeys });
-  const disablePlugin = useEntityMutation('commissionCore', 'disablePlugin', { invalidateKeys });
-  const configureWithdrawal = useEntityMutation('commissionCore', 'configureWithdrawal', { invalidateKeys });
-  const pauseWithdrawal = useEntityMutation('commissionCore', 'pauseWithdrawal', { invalidateKeys });
-  const resumeWithdrawal = useEntityMutation('commissionCore', 'resumeWithdrawal', { invalidateKeys });
-  const withdrawNex = useEntityMutation('commissionCore', 'withdrawNex', { invalidateKeys });
-  const withdrawToken = useEntityMutation('commissionCore', 'withdrawToken', { invalidateKeys });
+  const setCommissionModes = useEntityMutation('commissionCore', 'setCommissionModes', { invalidateKeys });
+  const enableCommission = useEntityMutation('commissionCore', 'enableCommission', { invalidateKeys });
+  const configureWithdrawal = useEntityMutation('commissionCore', 'setWithdrawalConfig', { invalidateKeys });
+  const pauseWithdrawal = useEntityMutation('commissionCore', 'pauseWithdrawals', { invalidateKeys });
+  const withdrawNex = useEntityMutation('commissionCore', 'withdrawCommission', { invalidateKeys });
+  const withdrawToken = useEntityMutation('commissionCore', 'withdrawTokenCommission', { invalidateKeys });
 
   return {
     // Query data
@@ -130,11 +129,10 @@ export function useCommission() {
     useMemberCommission,
     // Mutations
     setCommissionRate,
-    enablePlugin,
-    disablePlugin,
+    setCommissionModes,
+    enableCommission,
     configureWithdrawal,
     pauseWithdrawal,
-    resumeWithdrawal,
     withdrawNex,
     withdrawToken,
   };

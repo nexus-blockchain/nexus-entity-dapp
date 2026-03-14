@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useIpfsGatewayStore } from '@/stores/ipfs-gateway-store';
 
 interface IpfsContentProps {
   cid: string;
@@ -18,25 +19,34 @@ export function IpfsContent({ cid, className }: IpfsContentProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const t = useTranslations('ipfs');
+  const getOrderedGateways = useIpfsGatewayStore((s) => s.getOrderedGateways);
 
   const fetchContent = useCallback(async () => {
     setLoading(true);
     setError(null);
     setContent(null);
 
-    try {
-      const response = await fetch(ipfsUrl(cid));
-      if (!response.ok) {
-        throw new Error(`Failed to fetch (${response.status})`);
+    const gateways = getOrderedGateways();
+    let lastErr: string | null = null;
+
+    for (const gw of gateways) {
+      try {
+        const response = await fetch(ipfsUrl(cid, gw));
+        if (!response.ok) {
+          throw new Error(`Failed to fetch (${response.status})`);
+        }
+        const text = await response.text();
+        setContent(text);
+        setLoading(false);
+        return;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : 'Failed to load content';
       }
-      const text = await response.text();
-      setContent(text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load content');
-    } finally {
-      setLoading(false);
     }
-  }, [cid]);
+
+    setError(lastErr ?? 'Failed to load content');
+    setLoading(false);
+  }, [cid, getOrderedGateways]);
 
   useEffect(() => {
     fetchContent();

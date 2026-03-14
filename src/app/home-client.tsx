@@ -7,6 +7,7 @@ import type { InjectedAccountWithMeta } from '@polkadot/extension-inject/types';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { NodeHealthIndicator } from '@/components/node-health-indicator';
 import { useWallet } from '@/hooks/use-wallet';
+import { useNexBalance } from '@/hooks/use-external-queries';
 import { isTauri } from '@/lib/utils/platform';
 import { DesktopWalletDialog } from '@/components/wallet/desktop-wallet-dialog';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
@@ -16,13 +17,13 @@ import { EntityType, EntityStatus } from '@/lib/types/enums';
 import type { EntityData } from '@/lib/types/models';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectTrigger,
@@ -224,11 +225,13 @@ export function HomePage() {
     name: walletName,
     source,
     isConnected,
-    balance,
     getAccounts,
     connect,
     disconnect,
   } = useWallet();
+
+  const { data: nexBalance } = useNexBalance(address);
+  const balance = nexBalance?.free ?? BigInt(0);
 
   // Entity ID navigation
   const [entityId, setEntityId] = useState('');
@@ -241,6 +244,7 @@ export function HomePage() {
   const [walletOpen, setWalletOpen] = useState(false);
 
   // Create entity form
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [entityName, setEntityName] = useState('');
   const [entityType, setEntityType] = useState<EntityType>(EntityType.Merchant);
   const [initialFund, setInitialFund] = useState('');
@@ -252,11 +256,13 @@ export function HomePage() {
 
   // Entity mutation
   const { mutate, txState, reset } = useEntityMutation('entityRegistry', 'createEntity', {
+    invalidateKeys: [['allEntities'], ['userEntities', address]],
     onSuccess: () => {
       setEntityName('');
       setEntityType(EntityType.Merchant);
       setInitialFund('');
       setReferrerAddress('');
+      setTimeout(() => setShowCreateDialog(false), 1200);
     },
   });
 
@@ -274,8 +280,22 @@ export function HomePage() {
       const entries = await (api.query as any).entityRegistry.entities.entries();
       const results: EntitySummary[] = [];
 
-      const hasShopPallet = !!(api.query as any).entityShop?.entityShopIds;
+      const hasShopPallet = !!(api.query as any).entityShop?.shopEntity;
       const hasTokenPallet = !!(api.query as any).entityToken?.tokenConfigs;
+
+      // Pre-build shopCount map: entityId -> count
+      const shopCountMap = new Map<number, number>();
+      if (hasShopPallet) {
+        try {
+          const shopEntries = await (api.query as any).entityShop.shopEntity.entries();
+          for (const [, val] of shopEntries) {
+            const eid = Number(val.toString());
+            shopCountMap.set(eid, (shopCountMap.get(eid) ?? 0) + 1);
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       for (const [key, rawValue] of entries) {
         const parsed = parseEntityBrief(rawValue);
@@ -284,25 +304,17 @@ export function HomePage() {
         const eid = Number(key.args[0]);
         if (isNaN(eid)) continue;
 
-        let shopCount = 0;
+        let shopCount = shopCountMap.get(eid) ?? 0;
         let tokenSymbol: string | null = null;
         try {
-          const promises: Promise<unknown>[] = [
-            hasShopPallet ? (api.query as any).entityShop.entityShopIds(eid) : Promise.resolve(null),
-            hasTokenPallet ? (api.query as any).entityToken.tokenConfigs(eid) : Promise.resolve(null),
-          ];
-          const [shopIdsRaw, tokenConfigRaw] = await Promise.all(promises);
-
-          if (shopIdsRaw && !(shopIdsRaw as { isNone?: boolean }).isNone) {
-            const vec = (shopIdsRaw as any).toJSON?.() ?? shopIdsRaw;
-            if (Array.isArray(vec)) shopCount = vec.length;
-          }
-
-          if (tokenConfigRaw && !(tokenConfigRaw as { isNone?: boolean }).isNone) {
-            const unwrapped = (tokenConfigRaw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? tokenConfigRaw;
-            if (unwrapped) {
-              const cfg = unwrapped as Record<string, unknown>;
-              tokenSymbol = cfg.symbol ? String(cfg.symbol) : null;
+          if (hasTokenPallet) {
+            const tokenConfigRaw = await (api.query as any).entityToken.tokenConfigs(eid);
+            if (tokenConfigRaw && !(tokenConfigRaw as { isNone?: boolean }).isNone) {
+              const unwrapped = (tokenConfigRaw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? tokenConfigRaw;
+              if (unwrapped) {
+                const cfg = unwrapped as Record<string, unknown>;
+                tokenSymbol = cfg.symbol ? String(cfg.symbol) : null;
+              }
             }
           }
         } catch {
@@ -591,124 +603,125 @@ export function HomePage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {isTauri() ? (
-                    !isConnected ? (
-                      <>
-                        <DesktopWalletDialog />
-                        <p className="text-xs text-muted-foreground">
-                          {t('desktopWalletDesc')}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          <Badge variant="success">{t('connected')}</Badge>
-                          <Badge variant="outline" className="text-xs">{t('desktopWallet')}</Badge>
-                        </div>
-                        <div className="space-y-2 rounded-md bg-muted/50 p-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('account')}</span>
-                            <span className="text-sm font-medium">{walletName}</span>
+                  {!isConnected ? (
+                    <>
+                      {/* Built-in wallet (always available) */}
+                      <DesktopWalletDialog />
+                      {/* Extension connect (browser only) */}
+                      {!isTauri() && (
+                        <>
+                          <div className="relative my-1">
+                            <div className="absolute inset-0 flex items-center"><Separator /></div>
+                            <div className="relative flex justify-center">
+                              <span className="bg-card px-2 text-xs text-muted-foreground">{t('orExtension')}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('address')}</span>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {address ? shortenAddress(address) : '--'}
-                            </span>
-                          </div>
-                          <Separator />
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('balance')}</span>
-                            <span className="text-sm font-semibold">{formatBalance(balance)} NEX</span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <DesktopWalletDialog />
-                          <Button variant="outline" size="sm" onClick={disconnect} className="flex-1">
-                            <LogOut className="mr-2 h-4 w-4" />
-                            {t('disconnect')}
+                          <Button variant="outline" onClick={handleConnectWallet} disabled={walletLoading} className="w-full">
+                            {walletLoading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Wallet className="mr-2 h-4 w-4" />
+                            )}
+                            {walletLoading ? t('connectingWallet') : t('extensionConnect')}
                           </Button>
+                        </>
+                      )}
+                      {showAccountSelector && accounts.length > 0 && (
+                        <div className="space-y-2 rounded-md border border-input p-3">
+                          <p className="text-sm font-medium">{t('selectAccount')}</p>
+                          {accounts.map((acc) => (
+                            <button
+                              key={acc.address}
+                              onClick={() => handleSelectAccount(acc)}
+                              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium">{acc.meta.name || t('unnamed')}</p>
+                                <p className="truncate text-xs text-muted-foreground">{shortenAddress(acc.address)}</p>
+                              </div>
+                              <Badge variant="outline" className="shrink-0 text-xs">{acc.meta.source}</Badge>
+                            </button>
+                          ))}
                         </div>
-                      </>
-                    )
-                  ) : (
-                    !isConnected ? (
-                      <>
-                        <Button onClick={handleConnectWallet} disabled={walletLoading} className="w-full">
-                          {walletLoading ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Wallet className="mr-2 h-4 w-4" />
-                          )}
-                          {walletLoading ? t('connectingWallet') : t('walletConnection')}
-                        </Button>
-                        {showAccountSelector && accounts.length > 0 && (
-                          <div className="space-y-2 rounded-md border border-input p-3">
-                            <p className="text-sm font-medium">{t('selectAccount')}</p>
-                            {accounts.map((acc) => (
-                              <button
-                                key={acc.address}
-                                onClick={() => handleSelectAccount(acc)}
-                                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-medium">{acc.meta.name || t('unnamed')}</p>
-                                  <p className="truncate text-xs text-muted-foreground">{shortenAddress(acc.address)}</p>
-                                </div>
-                                <Badge variant="outline" className="shrink-0 text-xs">{acc.meta.source}</Badge>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {walletError && (
-                          <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                            <span>{walletError}</span>
-                          </div>
-                        )}
-                        <p className="text-xs text-muted-foreground">{t('supportedWallets')}</p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          <Badge variant="success">{t('connected')}</Badge>
-                          {source && <Badge variant="outline" className="text-xs">{source}</Badge>}
+                      )}
+                      {walletError && (
+                        <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span>{walletError}</span>
                         </div>
-                        <div className="space-y-2 rounded-md bg-muted/50 p-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('account')}</span>
-                            <span className="text-sm font-medium">{walletName}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('address')}</span>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {address ? shortenAddress(address) : '--'}
-                            </span>
-                          </div>
-                          <Separator />
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t('balance')}</span>
-                            <span className="text-sm font-semibold">{formatBalance(balance)} NEX</span>
-                          </div>
+                      )}
+                    </>
+                  ) : source === 'desktop-keyring' ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <Badge variant="success">{t('connected')}</Badge>
+                        <Badge variant="outline" className="text-xs">{t('desktopWallet')}</Badge>
+                      </div>
+                      <div className="space-y-2 rounded-md bg-muted/50 p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('account')}</span>
+                          <span className="text-sm font-medium">{walletName}</span>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            disconnect();
-                            setShowAccountSelector(false);
-                            setAccounts([]);
-                            setWalletError(null);
-                          }}
-                          className="w-full"
-                        >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('address')}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {address ? shortenAddress(address) : '--'}
+                          </span>
+                        </div>
+                        <Separator />
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('balance')}</span>
+                          <span className="text-sm font-semibold">{formatBalance(balance)} NEX</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <DesktopWalletDialog />
+                        <Button variant="outline" size="sm" onClick={disconnect} className="flex-1">
                           <LogOut className="mr-2 h-4 w-4" />
-                          {t('disconnectWallet')}
+                          {t('disconnect')}
                         </Button>
-                      </>
-                    )
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <Badge variant="success">{t('connected')}</Badge>
+                        {source && <Badge variant="outline" className="text-xs">{source}</Badge>}
+                      </div>
+                      <div className="space-y-2 rounded-md bg-muted/50 p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('account')}</span>
+                          <span className="text-sm font-medium">{walletName}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('address')}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {address ? shortenAddress(address) : '--'}
+                          </span>
+                        </div>
+                        <Separator />
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">{t('balance')}</span>
+                          <span className="text-sm font-semibold">{formatBalance(balance)} NEX</span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          disconnect();
+                          setShowAccountSelector(false);
+                          setAccounts([]);
+                          setWalletError(null);
+                        }}
+                        className="w-full"
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        {t('disconnectWallet')}
+                      </Button>
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -754,64 +767,20 @@ export function HomePage() {
                   {myEntities.length > 0 && (
                     <Badge variant="secondary" className="text-xs">{myEntities.length}</Badge>
                   )}
-                </div>
-
-                {myEntitiesLoading ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {[1, 2].map((i) => (
-                      <Card key={i}>
-                        <CardHeader className="pb-3">
-                          <div className="flex items-center gap-2">
-                            <Skeleton className="h-8 w-8 rounded-md" />
-                            <Skeleton className="h-5 w-32" />
-                          </div>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <Skeleton className="h-16 rounded-md" />
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : myEntities.length > 0 ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {myEntities.map((ent) => (
-                      <EntityCard key={ent.id} ent={ent} router={router} t={t} te={te} />
-                    ))}
-                  </div>
-                ) : myEntityIds && myEntityIds.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex items-center gap-3 py-6 justify-center">
-                      <Building2 className="h-5 w-5 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground">{t('noMyEntities')}</p>
-                    </CardContent>
-                  </Card>
-                ) : null}
-              </div>
-            )}
-
-            {/* ===== Wallet Actions (connected) ===== */}
-            {isConnected && (
-              <Tabs defaultValue="create" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="create">
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    {t('createEntity')}
-                  </TabsTrigger>
-                  <TabsTrigger value="transfer">
-                    <Send className="mr-1.5 h-3.5 w-3.5" />
-                    {t('nexTransfer')}
-                  </TabsTrigger>
-                </TabsList>
-
-                {/* Create Entity */}
-                <TabsContent value="create">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">{t('createNewEntity')}</CardTitle>
-                      <CardDescription>{t('createEntityDesc')}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="flex-1" />
+                  <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="gap-1.5">
+                        <Plus className="h-4 w-4" />
+                        {t('createEntity')}
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>{t('createNewEntity')}</DialogTitle>
+                      </DialogHeader>
+                      <p className="text-sm text-muted-foreground">{t('createEntityDesc')}</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">
                           <Label htmlFor="entity-name">{t('entityName')}</Label>
                           <Input
@@ -849,7 +818,7 @@ export function HomePage() {
                           </div>
                         </div>
                       </div>
-                      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <Button onClick={handleCreateEntity} disabled={!entityName.trim() || isTxPending} className="sm:w-auto">
                           {isTxPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
                           {txState.status === 'signing' ? t('signing') : txState.status === 'broadcasting' ? t('broadcasting') : txState.status === 'inBlock' ? t('inBlock') : t('createEntity')}
@@ -859,7 +828,6 @@ export function HomePage() {
                             <CheckCircle2 className="h-4 w-4" />
                             <span>{t('createSuccess')}</span>
                             {txState.hash && <span className="font-mono text-xs text-muted-foreground">{shortenAddress(txState.hash)}</span>}
-                            <Button variant="link" size="sm" onClick={reset} className="h-auto p-0 text-xs">{tc('reset')}</Button>
                           </div>
                         )}
                         {txState.status === 'error' && (
@@ -870,40 +838,78 @@ export function HomePage() {
                           </div>
                         )}
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                    </DialogContent>
+                  </Dialog>
+                </div>
 
-                {/* NEX Transfer */}
-                <TabsContent value="transfer">
-                  <Card id="transfer" className="scroll-mt-4">
-                    <CardHeader>
-                      <CardTitle className="text-base">{t('nexTransfer')}</CardTitle>
-                      <CardDescription>{t('nexTransferDesc')}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="transfer-to">{t('recipientAddress')}</Label>
-                          <Input id="transfer-to" type="text" placeholder="5Xxxx..." value={transferTo} onChange={(e) => setTransferTo(e.target.value)} disabled={isNexTransferPending} className="font-mono text-sm" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="transfer-amount">{t('transferAmount')}</Label>
-                          <Input id="transfer-amount" type="number" min="0" step="0.0001" placeholder="0.00" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} disabled={isNexTransferPending} />
-                          <p className="text-xs text-muted-foreground">{t('availableBalance')}: {formatBalance(balance)} NEX</p>
-                        </div>
-                      </div>
-                      <div className="mt-4 flex items-center gap-3">
-                        <Button onClick={handleNexTransfer} disabled={!transferTo.trim() || !transferAmount || isNexTransferPending}>
-                          {isNexTransferPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                          {t('sendTransfer')}
-                        </Button>
-                        <TxStatusIndicator txState={nexTransfer.txState} />
-                      </div>
+                {myEntitiesLoading ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {[1, 2].map((i) => (
+                      <Card key={i}>
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-8 w-8 rounded-md" />
+                            <Skeleton className="h-5 w-32" />
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <Skeleton className="h-16 rounded-md" />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : myEntities.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {myEntities.map((ent) => (
+                      <EntityCard key={ent.id} ent={ent} router={router} t={t} te={te} />
+                    ))}
+                  </div>
+                ) : myEntityIds && myEntityIds.length === 0 ? (
+                  <Card className="border-dashed">
+                    <CardContent className="flex flex-col items-center gap-3 py-8">
+                      <Building2 className="h-8 w-8 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">{t('noMyEntities')}</p>
+                      <Button variant="outline" size="sm" onClick={() => setShowCreateDialog(true)}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        {t('createEntity')}
+                      </Button>
                     </CardContent>
                   </Card>
-                </TabsContent>
-              </Tabs>
+                ) : null}
+              </div>
+            )}
+
+            {/* ===== NEX Transfer (connected) ===== */}
+            {isConnected && (
+              <Card id="transfer" className="scroll-mt-4">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Send className="h-4 w-4" />
+                    {t('nexTransfer')}
+                  </CardTitle>
+                  <CardDescription>{t('nexTransferDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="transfer-to">{t('recipientAddress')}</Label>
+                      <Input id="transfer-to" type="text" placeholder="5Xxxx..." value={transferTo} onChange={(e) => setTransferTo(e.target.value)} disabled={isNexTransferPending} className="font-mono text-sm" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="transfer-amount">{t('transferAmount')}</Label>
+                      <Input id="transfer-amount" type="number" min="0" step="0.0001" placeholder="0.00" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} disabled={isNexTransferPending} />
+                      <p className="text-xs text-muted-foreground">{t('availableBalance')}: {formatBalance(balance)} NEX</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-3">
+                    <Button onClick={handleNexTransfer} disabled={!transferTo.trim() || !transferAmount || isNexTransferPending}>
+                      {isNexTransferPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                      {t('sendTransfer')}
+                    </Button>
+                    <TxStatusIndicator txState={nexTransfer.txState} />
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </CollapsibleContent>
         </Collapsible>

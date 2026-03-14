@@ -48,7 +48,23 @@ export function useEntityMutation(
         setTxState({ status: 'signing', hash: null, error: null, blockNumber: null });
 
         const signer = await getSigner();
-        const tx = (api.tx as any)[palletName][callName](...params);
+
+        const pallet = (api.tx as any)[palletName];
+        if (!pallet) {
+          // Log available pallets for debugging
+          const available = Object.keys(api.tx).filter(k => !k.startsWith('$')).join(', ');
+          console.error(`[useEntityMutation] Pallet "${palletName}" not found. Available: ${available}`);
+          throw new Error(`Pallet "${palletName}" not found on chain`);
+        }
+
+        const call = pallet[callName];
+        if (!call) {
+          const available = Object.keys(pallet).filter(k => !k.startsWith('$')).join(', ');
+          console.error(`[useEntityMutation] Method "${callName}" not found in "${palletName}". Available: ${available}`);
+          throw new Error(`Method "${palletName}.${callName}" not found on chain`);
+        }
+
+        const tx = call(...params);
 
         setTxState((prev) => ({ ...prev, status: 'broadcasting' }));
 

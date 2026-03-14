@@ -15,17 +15,17 @@ function parseShopData(raw: unknown, entityStatus: string): ShopData | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
   const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
   if (!unwrapped) return null;
-  const obj = unwrapped as Record<string, unknown>;
+  const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
 
-  const operatingStatus = String(obj.operatingStatus ?? 'Active') as ShopOperatingStatus;
-  const fundBalance = BigInt(String(obj.fundBalance ?? 0));
+  const operatingStatus = String(obj.operatingStatus ?? obj.operating_status ?? 'Active') as ShopOperatingStatus;
+  const fundBalance = BigInt(String(obj.fundBalance ?? obj.fund_balance ?? 0));
   const fundDepleted = fundBalance <= BigInt(0);
 
   return {
     id: Number(obj.id ?? 0),
-    entityId: Number(obj.entityId ?? 0),
+    entityId: Number(obj.entityId ?? obj.entity_id ?? 0),
     name: String(obj.name ?? ''),
-    shopType: String(obj.shopType ?? 'OnlineStore') as ShopData['shopType'],
+    shopType: String(obj.shopType ?? obj.shop_type ?? 'OnlineStore') as ShopData['shopType'],
     operatingStatus,
     effectiveStatus: computeEffectiveShopStatus(
       entityStatus as any,
@@ -33,16 +33,18 @@ function parseShopData(raw: unknown, entityStatus: string): ShopData | null {
       fundDepleted,
     ),
     fundBalance,
-    pointsConfig: obj.pointsConfig ? parsePointsConfig(obj.pointsConfig) : null,
+    pointsConfig: obj.pointsConfig ?? obj.points_config
+      ? parsePointsConfig(obj.pointsConfig ?? obj.points_config)
+      : null,
   };
 }
 
 function parsePointsConfig(raw: unknown): PointsConfig | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
-  const obj = (raw as Record<string, unknown>);
+  const obj = (raw as any).toJSON?.() ?? raw;
   return {
-    rewardRateBps: Number(obj.rewardRateBps ?? 0),
-    exchangeRateBps: Number(obj.exchangeRateBps ?? 0),
+    rewardRateBps: Number(obj.rewardRateBps ?? obj.reward_rate_bps ?? 0),
+    exchangeRateBps: Number(obj.exchangeRateBps ?? obj.exchange_rate_bps ?? 0),
     transferable: Boolean(obj.transferable),
   };
 }
@@ -53,15 +55,19 @@ export function useShops() {
   const { entityId, entity } = useEntityContext();
   const entityStatus = entity?.status ?? 'Active';
 
-  // Query shop IDs for this entity
+  // Query shop IDs for this entity via shopEntity reverse map
   const shopIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'shops'],
     async (api) => {
-      if (!(api.query as any).entityShop?.entityShopIds) return [];
-      const raw = await (api.query as any).entityShop.entityShopIds(entityId);
-      if (!raw) return [];
-      const arr = raw.toJSON?.() ?? raw;
-      return Array.isArray(arr) ? arr.map(Number) : [];
+      if (!(api.query as any).entityShop?.shopEntity) return [];
+      const entries = await (api.query as any).entityShop.shopEntity.entries();
+      const ids: number[] = [];
+      for (const [key, val] of entries) {
+        if (Number(val.toString()) === entityId) {
+          ids.push(key.args[0].toNumber());
+        }
+      }
+      return ids;
     },
     { staleTime: STALE_TIMES.shops },
   );
@@ -112,7 +118,7 @@ export function useShops() {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
-  const depositFund = useEntityMutation('entityShop', 'depositFund', {
+  const depositFund = useEntityMutation('entityShop', 'fundOperating', {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 

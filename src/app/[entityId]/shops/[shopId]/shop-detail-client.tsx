@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useShops } from '@/hooks/use-shops';
@@ -281,7 +282,7 @@ export function ShopDetailPage() {
   const tc = useTranslations('common');
   const params = useParams();
   const shopId = Number(params.shopId);
-  const { isReadOnly, isSuspended } = useEntityContext();
+  const { isReadOnly, isSuspended, entityId } = useEntityContext();
   const { getShop, isLoading, error } = useShops();
 
   const shop = getShop(shopId);
@@ -335,6 +336,20 @@ export function ShopDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Quick navigation */}
+      <div className="flex gap-3">
+        <Button asChild>
+          <Link href={`/${entityId}/shops/${shopId}/products`}>
+            {t('detail.manageProducts')}
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href={`/${entityId}/shops/${shopId}/orders`}>
+            {t('detail.viewOrders')}
+          </Link>
+        </Button>
+      </div>
 
       {/* Points System Management — requires SHOP_MANAGE */}
       {!isReadOnly && !isSuspended && (

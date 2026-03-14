@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
 import { ApiProvider } from '@/lib/chain/api-provider';
+import { IpfsHealthProvider } from '@/lib/ipfs/ipfs-health-provider';
 import { defaultLocale, type Locale, locales } from '@/i18n/config';
 
 function getStoredLocale(): Locale {
@@ -47,11 +48,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ApiProvider>
-        <NextIntlClientProvider locale={locale} messages={messages}>
-          <LocaleContext.Provider value={{ locale, setLocale }}>
-            {children}
-          </LocaleContext.Provider>
-        </NextIntlClientProvider>
+        <IpfsHealthProvider>
+          <NextIntlClientProvider locale={locale} messages={messages}>
+            <LocaleContext.Provider value={{ locale, setLocale }}>
+              {children}
+            </LocaleContext.Provider>
+          </NextIntlClientProvider>
+        </IpfsHealthProvider>
       </ApiProvider>
     </QueryClientProvider>
   );

@@ -11,6 +11,8 @@ import { MemberStatus, RegistrationPolicy } from '@/lib/types/enums';
 
 import { useTranslations } from 'next-intl';
 
+import { useApi } from '@/lib/chain/api-provider';
+
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -99,9 +101,23 @@ function PolicySection() {
   const t = useTranslations('members');
   const tc = useTranslations('common');
   const { entityId } = useEntityContext();
+  const { api } = useApi();
   const { policy, setRegistrationPolicy } = useMembers();
   const [localPolicy, setLocalPolicy] = useState<number | null>(null);
   const current = localPolicy ?? policy;
+
+  // DEBUG: 在 render 时打印，确保能看到
+  console.log('[DEBUG-RENDER] api ready:', !!api, 'entityId:', entityId, 'policy:', policy);
+  if (api) {
+    try {
+      const txMethods = Object.keys((api.tx as any).entityMember ?? {}).filter(k => !k.startsWith('$'));
+      const storageKeys = Object.keys((api.query as any).entityMember ?? {}).filter(k => !k.startsWith('$'));
+      const meta = (api.tx as any).entityMember?.setMemberPolicy?.meta?.toJSON?.();
+      console.log('[DEBUG] entityMember tx methods:', txMethods);
+      console.log('[DEBUG] entityMember storage keys:', storageKeys);
+      console.log('[DEBUG] setMemberPolicy meta args:', meta?.args);
+    } catch (e) { console.log('[DEBUG] error:', e); }
+  }
 
   const toggleBit = useCallback((bit: number) => {
     setLocalPolicy((prev) => (prev ?? policy) ^ bit);

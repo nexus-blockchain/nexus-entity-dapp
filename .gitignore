@@ -25,6 +25,7 @@ src-tauri/WixTools/
 
 # Misc
 *.pem
+*.tar.gz
 
 # Debug
 npm-debug.log*

@@ -5,6 +5,7 @@ import type { EntityContext, EntityData } from '@/lib/types/models';
 import { EntityStatus, EntityType, GovernanceMode } from '@/lib/types/enums';
 import { useEntityQuery } from '@/hooks/use-entity-query';
 import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString, entityTreasuryAddress } from '@/lib/utils/codec';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
 
@@ -18,10 +19,11 @@ function parseEntityData(raw: unknown): EntityData | null {
   return {
     id: Number(obj.id ?? 0),
     owner: String(obj.owner ?? ''),
-    name: String(obj.name ?? ''),
-    logoCid: obj.logoCid ? String(obj.logoCid) : null,
-    descriptionCid: obj.descriptionCid ? String(obj.descriptionCid) : null,
-    metadataUri: obj.metadataUri ? String(obj.metadataUri) : null,
+    name: decodeChainString(obj.name),
+    logoCid: obj.logoCid ? decodeChainString(obj.logoCid) : null,
+    descriptionCid: obj.descriptionCid ? decodeChainString(obj.descriptionCid) : null,
+    metadataUri: obj.metadataUri ? decodeChainString(obj.metadataUri) : null,
+    contactCid: obj.contactCid ? decodeChainString(obj.contactCid) : null,
     status: String(obj.status ?? 'Active') as EntityStatus,
     entityType: String(obj.entityType ?? 'Merchant') as EntityType,
     governanceMode: String(obj.governanceMode ?? 'None') as GovernanceMode,
@@ -57,7 +59,18 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
     ['entity', entityId],
     async (api) => {
       const raw = await api.query.entityRegistry.entities(entityId);
-      return parseEntityData(raw);
+      const entity = parseEntityData(raw);
+      if (!entity) return null;
+      // Fund balance lives in treasury sub-account, not in Entity struct
+      try {
+        const treasuryAddr = entityTreasuryAddress(entityId);
+        const acctInfo = await api.query.system.account(treasuryAddr);
+        const data = (acctInfo as any)?.data;
+        entity.fundBalance = BigInt(String(data?.free ?? 0));
+      } catch {
+        // Non-critical, leave as 0
+      }
+      return entity;
     },
     { staleTime: STALE_TIMES.entity },
   );

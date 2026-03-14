@@ -46,6 +46,7 @@ export interface EntityData {
   logoCid: string | null;
   descriptionCid: string | null;
   metadataUri: string | null;
+  contactCid: string | null;
   status: EntityStatus;
   entityType: EntityType;
   governanceMode: GovernanceMode;

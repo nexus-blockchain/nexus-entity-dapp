@@ -67,6 +67,7 @@ function EntityInfoSection() {
   const [logoCid, setLogoCid] = useState(entity?.logoCid ?? '');
   const [descriptionCid, setDescriptionCid] = useState(entity?.descriptionCid ?? '');
   const [metadataUri, setMetadataUri] = useState(entity?.metadataUri ?? '');
+  const [contactCid, setContactCid] = useState(entity?.contactCid ?? '');
 
   const updateEntity = useEntityMutation('entityRegistry', 'updateEntity', {
     invalidateKeys: [['entity', entityId]],
@@ -92,18 +93,29 @@ function EntityInfoSection() {
     [ipfsUpload],
   );
 
+  const handleContactUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const cid = await ipfsUpload.upload(file);
+      if (cid) setContactCid(cid);
+    },
+    [ipfsUpload],
+  );
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       updateEntity.mutate([
         entityId,
-        name,
+        name || null,
         logoCid || null,
         descriptionCid || null,
         metadataUri || null,
+        contactCid || null,
       ]);
     },
-    [entityId, name, logoCid, descriptionCid, metadataUri, updateEntity],
+    [entityId, name, logoCid, descriptionCid, metadataUri, contactCid, updateEntity],
   );
 
   const isBusy = updateEntity.txState.status === 'signing' || updateEntity.txState.status === 'broadcasting';
@@ -177,6 +189,21 @@ function EntityInfoSection() {
               onChange={(e) => setMetadataUri(e.target.value)}
               placeholder="https://..."
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="contact-upload">{t('contact')}</Label>
+            <div className="flex items-center gap-3">
+              <Input
+                id="contact-upload"
+                type="file"
+                onChange={handleContactUpload}
+                className="cursor-pointer"
+              />
+            </div>
+            {contactCid && (
+              <p className="text-xs text-muted-foreground break-all">CID: {contactCid}</p>
+            )}
           </div>
 
           <div className="flex items-center gap-3 pt-2">

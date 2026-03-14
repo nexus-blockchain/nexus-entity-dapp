@@ -26,6 +26,9 @@ import {
   CheckCircle2,
   Copy,
   Trash2,
+  KeyRound,
+  ShieldAlert,
+  ArrowLeft,
 } from 'lucide-react';
 
 export function DesktopWalletDialog() {
@@ -59,6 +62,15 @@ export function DesktopWalletDialog() {
   const [existingAccounts, setExistingAccounts] = useState<InjectedAccountWithMeta[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [unlockPassword, setUnlockPassword] = useState('');
+
+  // Export state
+  const [exportAddress, setExportAddress] = useState<string | null>(null);
+  const [exportPassword, setExportPassword] = useState('');
+  const [exportedSecretKey, setExportedSecretKey] = useState<string | null>(null);
+  const [exportedMnemonic, setExportedMnemonic] = useState<string | null | undefined>(undefined);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Load existing accounts when dialog opens
   useEffect(() => {
@@ -271,6 +283,41 @@ export function DesktopWalletDialog() {
     [loadAccounts, selectedAddress],
   );
 
+  const resetExportState = () => {
+    setExportAddress(null);
+    setExportPassword('');
+    setExportedSecretKey(null);
+    setExportedMnemonic(undefined);
+    setExportLoading(false);
+    setExportError(null);
+    setCopiedField(null);
+  };
+
+  const handleExport = useCallback(async () => {
+    if (!exportAddress || !exportPassword) return;
+    setExportLoading(true);
+    setExportError(null);
+    try {
+      const dk = await import('@/lib/wallet/desktop-keyring');
+      const [secretKey, mnemonic] = await Promise.all([
+        dk.exportSecretKey(exportAddress, exportPassword),
+        dk.exportMnemonic(exportAddress, exportPassword),
+      ]);
+      setExportedSecretKey(secretKey);
+      setExportedMnemonic(mnemonic);
+    } catch {
+      setExportError(t('exportFailed'));
+    } finally {
+      setExportLoading(false);
+    }
+  }, [exportAddress, exportPassword, t]);
+
+  const handleCopy = useCallback((text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  }, []);
+
   const shortenAddress = (addr: string) =>
     addr.length > 16 ? `${addr.slice(0, 8)}...${addr.slice(-6)}` : addr;
 
@@ -321,7 +368,124 @@ export function DesktopWalletDialog() {
 
           {/* Unlock Tab */}
           <TabsContent value="unlock" className="space-y-4">
-            {existingAccounts.length === 0 ? (
+            {exportAddress ? (
+              /* Export panel */
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={resetExportState}
+                    className="rounded p-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <div>
+                    <p className="text-sm font-medium">{t('exportTitle')}</p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {shortenAddress(exportAddress)}
+                    </p>
+                  </div>
+                </div>
+
+                {exportedSecretKey ? (
+                  /* Show exported keys */
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{t('exportWarning')}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t('secretKey')}</Label>
+                      <div className="relative rounded-md border bg-muted/50 p-3">
+                        <p className="break-all pr-8 font-mono text-xs leading-relaxed">
+                          {exportedSecretKey}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-1 top-1"
+                          onClick={() => handleCopy(exportedSecretKey, 'secretKey')}
+                        >
+                          {copiedField === 'secretKey' ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t('mnemonic')}</Label>
+                      {exportedMnemonic ? (
+                        <div className="relative rounded-md border bg-muted/50 p-3">
+                          <p className="break-all pr-8 font-mono text-sm leading-relaxed">
+                            {exportedMnemonic}
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-1 top-1"
+                            onClick={() => handleCopy(exportedMnemonic, 'mnemonic')}
+                          >
+                            {copiedField === 'mnemonic' ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="rounded-md border border-dashed p-3 text-center text-sm text-muted-foreground">
+                          {t('mnemonicUnavailable')}
+                        </p>
+                      )}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      onClick={resetExportState}
+                      className="w-full"
+                    >
+                      {t('backToAccounts')}
+                    </Button>
+                  </div>
+                ) : (
+                  /* Password prompt */
+                  <div className="space-y-3">
+                    {exportError && (
+                      <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{exportError}</span>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="export-password">{t('exportPasswordPrompt')}</Label>
+                      <Input
+                        id="export-password"
+                        type="password"
+                        placeholder={t('passwordPlaceholder')}
+                        value={exportPassword}
+                        onChange={(e) => setExportPassword(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleExport()}
+                      />
+                    </div>
+                    <Button
+                      onClick={handleExport}
+                      disabled={!exportPassword || exportLoading}
+                      className="w-full"
+                    >
+                      {exportLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="mr-2 h-4 w-4" />
+                      )}
+                      {t('exportButton')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : existingAccounts.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
                 {t('noAccounts')}
               </p>
@@ -355,6 +519,17 @@ export function DesktopWalletDialog() {
                               {t('selected')}
                             </Badge>
                           )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              resetExportState();
+                              setExportAddress(acc.address);
+                            }}
+                            className="rounded p-1 text-muted-foreground hover:text-primary"
+                            title={t('exportAccount')}
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

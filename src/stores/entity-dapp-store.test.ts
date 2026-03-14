@@ -11,6 +11,7 @@ function makeEntity(overrides: Partial<EntityData> = {}): EntityData {
     logoCid: null,
     descriptionCid: null,
     metadataUri: null,
+    contactCid: null,
     status: EntityStatus.Active,
     entityType: EntityType.Merchant,
     governanceMode: GovernanceMode.None,

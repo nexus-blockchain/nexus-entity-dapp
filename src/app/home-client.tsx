@@ -9,6 +9,7 @@ import { NodeHealthIndicator } from '@/components/node-health-indicator';
 import { useWallet } from '@/hooks/use-wallet';
 import { useNexBalance } from '@/hooks/use-external-queries';
 import { isTauri } from '@/lib/utils/platform';
+import { decodeChainString, entityTreasuryAddress } from '@/lib/utils/codec';
 import { DesktopWalletDialog } from '@/components/wallet/desktop-wallet-dialog';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityQuery } from '@/hooks/use-entity-query';
@@ -74,10 +75,11 @@ function parseEntityBrief(raw: unknown): EntityData | null {
   return {
     id: Number(obj.id ?? 0),
     owner: String(obj.owner ?? ''),
-    name: String(obj.name ?? ''),
-    logoCid: obj.logoCid ? String(obj.logoCid) : null,
-    descriptionCid: obj.descriptionCid ? String(obj.descriptionCid) : null,
-    metadataUri: obj.metadataUri ? String(obj.metadataUri) : null,
+    name: decodeChainString(obj.name),
+    logoCid: obj.logoCid ? decodeChainString(obj.logoCid) : null,
+    descriptionCid: obj.descriptionCid ? decodeChainString(obj.descriptionCid) : null,
+    metadataUri: obj.metadataUri ? decodeChainString(obj.metadataUri) : null,
+    contactCid: obj.contactCid ? decodeChainString(obj.contactCid) : null,
     status: String(obj.status ?? 'Active') as EntityStatus,
     entityType: String(obj.entityType ?? 'Merchant') as EntityType,
     governanceMode: String(obj.governanceMode ?? 'None') as any,
@@ -281,7 +283,7 @@ export function HomePage() {
       const results: EntitySummary[] = [];
 
       const hasShopPallet = !!(api.query as any).entityShop?.shopEntity;
-      const hasTokenPallet = !!(api.query as any).entityToken?.tokenConfigs;
+      const hasTokenPallet = !!(api.query as any).entityToken?.entityTokenConfigs || !!(api.query as any).entityToken?.tokenConfigs;
 
       // Pre-build shopCount map: entityId -> count
       const shopCountMap = new Map<number, number>();
@@ -308,17 +310,36 @@ export function HomePage() {
         let tokenSymbol: string | null = null;
         try {
           if (hasTokenPallet) {
-            const tokenConfigRaw = await (api.query as any).entityToken.tokenConfigs(eid);
+            // Config tells us if token exists; metadata has name/symbol/decimals
+            const configFn = (api.query as any).entityToken.entityTokenConfigs ?? (api.query as any).entityToken.tokenConfigs;
+            const tokenConfigRaw = await configFn(eid);
             if (tokenConfigRaw && !(tokenConfigRaw as { isNone?: boolean }).isNone) {
-              const unwrapped = (tokenConfigRaw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? tokenConfigRaw;
-              if (unwrapped) {
-                const cfg = unwrapped as Record<string, unknown>;
-                tokenSymbol = cfg.symbol ? String(cfg.symbol) : null;
+              // Token exists, read metadata for symbol
+              const metaFn = (api.query as any).entityToken.entityTokenMetadata ?? (api.query as any).entityToken.tokenMetadata;
+              if (metaFn) {
+                const metaRaw = await metaFn(eid);
+                const meta = (metaRaw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? metaRaw;
+                if (meta) {
+                  const raw = Array.isArray(meta) ? meta[1] : ((meta as Record<string, unknown>).symbol ?? (meta as Record<string, unknown>)[1]);
+                  if (raw) {
+                    tokenSymbol = decodeChainString(raw);
+                  }
+                }
               }
             }
           }
         } catch {
           // Non-critical, use defaults
+        }
+
+        // Query treasury balance for fund display
+        try {
+          const treasuryAddr = entityTreasuryAddress(eid);
+          const acctInfo = await api.query.system.account(treasuryAddr);
+          const data = (acctInfo as any)?.data;
+          parsed.fundBalance = BigInt(String(data?.free ?? 0));
+        } catch {
+          // Non-critical
         }
 
         results.push({ ...parsed, id: eid, shopCount, tokenSymbol });

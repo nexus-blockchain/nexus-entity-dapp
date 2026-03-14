@@ -12,6 +12,9 @@ import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
 import { useTranslations } from 'next-intl';
 // ─── Constants ──────────────────────────────────────────────
 
+/** pallet-assets offset: asset_id = SHOP_TOKEN_OFFSET + entity_id */
+const SHOP_TOKEN_OFFSET = 1_000_000;
+
 const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
   [TokenType.Points]: '积分',
   [TokenType.Governance]: '治理代币',
@@ -46,6 +49,110 @@ function shortenAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
 }
 
+// ─── Create Token Form ──────────────────────────────────────
+
+function CreateTokenForm() {
+  const t = useTranslations('token');
+  const { entityId } = useEntityContext();
+  const { createToken } = useEntityToken();
+  const [name, setName] = useState('');
+  const [symbol, setSymbol] = useState('');
+  const [decimals, setDecimals] = useState('12');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!name.trim() || !symbol.trim()) return;
+      const decimalsNum = Number(decimals) || 12;
+      createToken.mutate([entityId, name.trim(), symbol.trim(), decimalsNum, 0, 0]);
+    },
+    [entityId, name, symbol, decimals, createToken],
+  );
+
+  const isBusy = createToken.txState.status === 'signing' || createToken.txState.status === 'broadcasting';
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('title')}</h1>
+
+      <PermissionGuard
+        required={AdminPermission.TOKEN_MANAGE}
+        fallback={
+          <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-300 p-12 text-sm text-gray-500 dark:border-gray-600">
+            {t('noTokenNoPermission')}
+          </div>
+        }
+      >
+        <section className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-900">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{t('createToken')}</h2>
+          <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t('createTokenDesc')}</p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Name */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('tokenName')}
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t('namePlaceholder')}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  required
+                />
+              </div>
+
+              {/* Symbol */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('symbol')}
+                </label>
+                <input
+                  type="text"
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value)}
+                  placeholder={t('symbolPlaceholder')}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  required
+                />
+              </div>
+
+              {/* Decimals */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('decimals')}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="18"
+                  value={decimals}
+                  onChange={(e) => setDecimals(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={isBusy}
+                className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('createTokenButton')}
+              </button>
+              <TxStatusIndicator txState={createToken.txState} />
+            </div>
+          </form>
+        </section>
+      </PermissionGuard>
+    </div>
+  );
+}
+
 // ─── Token Info Card ────────────────────────────────────────
 
 function TokenInfoCard({
@@ -59,6 +166,7 @@ function TokenInfoCard({
     <section className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-900">
       <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">代币信息</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <InfoItem label="资产 ID" value={String(SHOP_TOKEN_OFFSET + tokenConfig.entityId)} />
         <InfoItem label="名称" value={tokenConfig.name} />
         <InfoItem label="符号" value={tokenConfig.symbol} />
         <InfoItem label="精度" value={String(decimals)} />
@@ -476,11 +584,7 @@ export function TokenPage() {
   }
 
   if (!tokenConfig) {
-    return (
-      <div className="flex items-center justify-center p-12 text-sm text-gray-500">
-        该 Entity 尚未配置代币
-      </div>
-    );
+    return <CreateTokenForm />;
   }
 
   return (

@@ -428,6 +428,7 @@
     "logo": "Logo (IPFS)",
     "description": "Description (IPFS)",
     "metadataUri": "Metadata URI",
+    "contact": "Contact (IPFS)",
     "saveChanges": "Save Changes",
     "uploading": "Uploading…",
     "adminManagement": "Admin Management",
@@ -622,6 +623,16 @@
     "sendTokenTransfer": "Send Transfer",
     "myBalance": "My Balance",
     "connectWalletToTransfer": "Please connect wallet to use transfer",
+    "createToken": "Create Token",
+    "createTokenDesc": "Configure and create a token for this Entity",
+    "rewardRate": "Reward Rate (%)",
+    "rewardRateHelp": "Percentage of rewards for token holders (e.g. 5 = 5%)",
+    "exchangeRate": "Exchange Rate (%)",
+    "exchangeRateHelp": "Token exchange rate percentage (e.g. 5 = 5%)",
+    "namePlaceholder": "Enter token name",
+    "symbolPlaceholder": "Enter token symbol (e.g. TKN)",
+    "createTokenButton": "Create Token",
+    "noTokenNoPermission": "This Entity has not configured a token yet. Contact the Entity owner to create one.",
     "dividend": {
       "title": "Dividend Management",
       "loading": "Loading dividend info…",
@@ -1493,6 +1504,16 @@
     "mnemonicVerified": "Mnemonic verified, account connected",
     "mnemonicVerifiedManual": "Mnemonic verified, account created. Please unlock to connect.",
     "mnemonicVerifiedDone": "Mnemonic verified, account created",
-    "verifyFailed": "Verification failed, please check selected words"
+    "verifyFailed": "Verification failed, please check selected words",
+    "exportAccount": "Export Account",
+    "exportTitle": "Export Account Keys",
+    "exportPasswordPrompt": "Enter password to export keys",
+    "exportButton": "Export",
+    "secretKey": "Secret Key",
+    "mnemonic": "Mnemonic",
+    "mnemonicUnavailable": "Mnemonic not available (old account or imported via JSON)",
+    "exportWarning": "Never share your secret key or mnemonic with anyone. Anyone with access to these can steal your funds.",
+    "exportFailed": "Export failed — wrong password?",
+    "backToAccounts": "Back"
   }
 }

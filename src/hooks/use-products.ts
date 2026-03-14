@@ -4,6 +4,7 @@ import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString } from '@/lib/utils/codec';
 import type { ProductData } from '@/lib/types/models';
 import { ProductCategory, ProductStatus, ProductVisibility } from '@/lib/types/enums';
 
@@ -18,9 +19,9 @@ function parseProductData(raw: unknown): ProductData | null {
   return {
     id: Number(obj.id ?? 0),
     shopId: Number(obj.shopId ?? 0),
-    nameCid: String(obj.nameCid ?? ''),
-    imageCid: String(obj.imageCid ?? ''),
-    detailCid: String(obj.detailCid ?? ''),
+    nameCid: decodeChainString(obj.nameCid),
+    imageCid: decodeChainString(obj.imageCid),
+    detailCid: decodeChainString(obj.detailCid),
     priceNex: BigInt(String(obj.priceNex ?? 0)),
     priceUsdt: Number(obj.priceUsdt ?? 0),
     stock: Number(obj.stock ?? 0),

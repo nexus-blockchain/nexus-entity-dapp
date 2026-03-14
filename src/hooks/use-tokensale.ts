@@ -4,6 +4,7 @@ import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString } from '@/lib/utils/codec';
 import type { SaleRound, DutchAuctionConfig, VestingConfig } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
@@ -17,7 +18,7 @@ function parseSaleRoundEntries(rawEntries: [any, any][]): SaleRound[] {
     return {
       id: Number(key.args?.[1]?.toString() ?? obj.id ?? 0),
       entityId: Number(key.args?.[0]?.toString() ?? obj.entityId ?? obj.entity_id ?? 0),
-      name: String(obj.name ?? ''),
+      name: decodeChainString(obj.name),
       totalSupply: BigInt(String(obj.totalSupply ?? obj.total_supply ?? 0)),
       price: BigInt(String(obj.price ?? 0)),
       startBlock: Number(obj.startBlock ?? obj.start_block ?? 0),

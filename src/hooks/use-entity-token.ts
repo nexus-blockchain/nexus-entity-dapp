@@ -6,26 +6,61 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useWallet } from './use-wallet';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
+import { decodeChainString } from '@/lib/utils/codec';
 import type { TokenConfig } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
 
-function parseTokenConfig(raw: unknown, entityId: number): TokenConfig | null {
+/** Unwrap Option<T> from Polkadot.js codec */
+function unwrapOption(raw: unknown): unknown | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
-  const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
-  if (!unwrapped) return null;
-  const obj = unwrapped as Record<string, unknown>;
+  return (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
+}
+
+/**
+ * Parse token config from chain storage.
+ * Chain stores config and metadata separately:
+ *  - EntityTokenConfigs: { enabled, reward_rate, exchange_rate, token_type, max_supply, transfer_restriction, ... }
+ *  - EntityTokenMetadata: (name, symbol, decimals)
+ */
+function parseTokenConfig(
+  rawConfig: unknown,
+  rawMetadata: unknown,
+  entityId: number,
+): TokenConfig | null {
+  const config = unwrapOption(rawConfig);
+  if (!config) return null;
+  const cfg = config as Record<string, unknown>;
+
+  // Metadata is a tuple (name, symbol, decimals) or an object
+  let name = '';
+  let symbol = '';
+  let decimals = 0;
+  const meta = unwrapOption(rawMetadata);
+  if (meta) {
+    if (Array.isArray(meta)) {
+      // Codec tuple: [name, symbol, decimals]
+      name = decodeChainString(meta[0]);
+      symbol = decodeChainString(meta[1]);
+      decimals = Number(meta[2] ?? 0);
+    } else {
+      const m = meta as Record<string, unknown>;
+      name = decodeChainString(m.name ?? m[0]);
+      symbol = decodeChainString(m.symbol ?? m[1]);
+      decimals = Number(m.decimals ?? m[2] ?? 0);
+    }
+  }
 
   return {
     entityId,
-    name: String(obj.name ?? ''),
-    symbol: String(obj.symbol ?? ''),
-    decimals: Number(obj.decimals ?? 0),
-    tokenType: String(obj.tokenType ?? 'Points') as TokenType,
-    totalSupply: BigInt(String(obj.totalSupply ?? 0)),
-    maxSupply: BigInt(String(obj.maxSupply ?? 0)),
-    transferRestriction: String(obj.transferRestriction ?? 'None') as TransferRestrictionMode,
-    holderCount: Number(obj.holderCount ?? 0),
+    name,
+    symbol,
+    decimals,
+    tokenType: String(cfg.tokenType ?? cfg.token_type ?? 'Points') as TokenType,
+    totalSupply: BigInt(String(cfg.totalSupply ?? cfg.total_supply ?? 0)),
+    maxSupply: BigInt(String(cfg.maxSupply ?? cfg.max_supply ?? 0)),
+    transferRestriction: String(cfg.transferRestriction ?? cfg.transfer_restriction ?? 'None') as TransferRestrictionMode,
+    holderCount: Number(cfg.holderCount ?? cfg.holder_count ?? 0),
   };
 }
 
@@ -51,16 +86,20 @@ export function useEntityToken() {
   const { entityId } = useEntityContext();
   const { address } = useWallet();
 
-  // Query token config
+  // Query token config (from EntityTokenConfigs + EntityTokenMetadata)
   const tokenConfigQuery = useEntityQuery<TokenConfig | null>(
     ['entity', entityId, 'token'],
     async (api) => {
       if (!hasPallet(api, 'entityToken')) return null;
       const pallet = (api.query as any).entityToken;
-      const fn = pallet.tokenConfigs ?? pallet.tokenConfig ?? pallet.tokens;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return parseTokenConfig(raw, entityId);
+      const configFn = pallet.entityTokenConfigs ?? pallet.tokenConfigs ?? pallet.tokenConfig ?? pallet.tokens;
+      if (!configFn) return null;
+      const metadataFn = pallet.entityTokenMetadata ?? pallet.tokenMetadata;
+      const [rawConfig, rawMetadata] = await Promise.all([
+        configFn(entityId),
+        metadataFn ? metadataFn(entityId) : Promise.resolve(null),
+      ]);
+      return parseTokenConfig(rawConfig, rawMetadata, entityId);
     },
     { staleTime: STALE_TIMES.token },
   );
@@ -195,6 +234,10 @@ export function useEntityToken() {
     invalidateKeys: [['entity', entityId, 'token', 'blacklist']],
   });
 
+  const createToken = useEntityMutation('entityToken', 'createShopToken', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
   const transferTokens = useEntityMutation('entityToken', 'transfer', {
     invalidateKeys: [
       ['entity', entityId, 'token'],
@@ -212,6 +255,7 @@ export function useEntityToken() {
     myTokenBalance: myTokenBalanceQuery.data ?? BigInt(0),
     isLoading: tokenConfigQuery.isLoading,
     error: tokenConfigQuery.error,
+    createToken,
     mintTokens,
     burnTokens,
     setTransferRestriction,

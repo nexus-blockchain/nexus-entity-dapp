@@ -6,6 +6,7 @@ import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { computeEffectiveShopStatus } from '@/lib/utils/shop-status';
 import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString, shopTreasuryAddress } from '@/lib/utils/codec';
 import { ShopOperatingStatus } from '@/lib/types/enums';
 import type { ShopData, PointsConfig } from '@/lib/types/models';
 
@@ -24,7 +25,7 @@ function parseShopData(raw: unknown, entityStatus: string): ShopData | null {
   return {
     id: Number(obj.id ?? 0),
     entityId: Number(obj.entityId ?? obj.entity_id ?? 0),
-    name: String(obj.name ?? ''),
+    name: decodeChainString(obj.name),
     shopType: String(obj.shopType ?? obj.shop_type ?? 'OnlineStore') as ShopData['shopType'],
     operatingStatus,
     effectiveStatus: computeEffectiveShopStatus(
@@ -83,9 +84,31 @@ export function useShops() {
         ids.map((id) => (api.query as any).entityShop?.shops?.(id) ?? Promise.resolve(null)),
       );
 
-      return results
+      const shops = results
         .map((raw) => parseShopData(raw, entityStatus))
         .filter((s): s is ShopData => s !== null);
+
+      // Query treasury balances for each shop
+      await Promise.all(
+        shops.map(async (shop) => {
+          try {
+            const treasuryAddr = shopTreasuryAddress(shop.id);
+            const acctInfo = await api.query.system.account(treasuryAddr);
+            const data = (acctInfo as any)?.data;
+            shop.fundBalance = BigInt(String(data?.free ?? 0));
+            const fundDepleted = shop.fundBalance <= BigInt(0);
+            shop.effectiveStatus = computeEffectiveShopStatus(
+              entityStatus as any,
+              shop.operatingStatus as ShopOperatingStatus,
+              fundDepleted,
+            );
+          } catch {
+            // Non-critical
+          }
+        }),
+      );
+
+      return shops;
     },
     {
       staleTime: STALE_TIMES.shops,

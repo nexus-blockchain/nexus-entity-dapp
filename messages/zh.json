@@ -428,6 +428,7 @@
     "logo": "Logo (IPFS)",
     "description": "描述 (IPFS)",
     "metadataUri": "元数据 URI",
+    "contact": "联系方式 (IPFS)",
     "saveChanges": "保存更改",
     "uploading": "上传中…",
     "adminManagement": "管理员管理",
@@ -622,6 +623,16 @@
     "sendTokenTransfer": "发送转账",
     "myBalance": "我的余额",
     "connectWalletToTransfer": "请先连接钱包以使用转账功能",
+    "createToken": "创建代币",
+    "createTokenDesc": "为该 Entity 配置并创建代币",
+    "rewardRate": "奖励比例 (%)",
+    "rewardRateHelp": "代币持有者的奖励百分比（如 5 = 5%）",
+    "exchangeRate": "兑换比例 (%)",
+    "exchangeRateHelp": "代币兑换比例百分比（如 5 = 5%）",
+    "namePlaceholder": "输入代币名称",
+    "symbolPlaceholder": "输入代币符号（如 TKN）",
+    "createTokenButton": "创建代币",
+    "noTokenNoPermission": "该 Entity 尚未配置代币。请联系 Entity 所有者创建。",
     "dividend": {
       "title": "分红管理",
       "loading": "加载分红信息中…",
@@ -1493,6 +1504,16 @@
     "mnemonicVerified": "助记词验证通过，账户已连接",
     "mnemonicVerifiedManual": "助记词验证通过，账户创建完成。请手动解锁连接。",
     "mnemonicVerifiedDone": "助记词验证通过，账户创建完成",
-    "verifyFailed": "验证失败，请检查选择的词是否正确"
+    "verifyFailed": "验证失败，请检查选择的词是否正确",
+    "exportAccount": "导出账户",
+    "exportTitle": "导出账户密钥",
+    "exportPasswordPrompt": "输入密码以导出密钥",
+    "exportButton": "导出",
+    "secretKey": "私钥",
+    "mnemonic": "助记词",
+    "mnemonicUnavailable": "助记词不可用（旧账户或通过 JSON 导入）",
+    "exportWarning": "切勿将私钥或助记词分享给任何人。拥有这些信息的人可以窃取您的资金。",
+    "exportFailed": "导出失败 — 密码错误？",
+    "backToAccounts": "返回"
   }
 }

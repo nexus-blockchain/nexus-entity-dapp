@@ -4,6 +4,7 @@ import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString } from '@/lib/utils/codec';
 import { MemberStatus } from '@/lib/types/enums';
 import type { MemberData, CustomLevel } from '@/lib/types/models';
 import type { UpgradeTrigger } from '@/lib/types/enums';
@@ -37,7 +38,7 @@ function parseCustomLevels(rawEntries: [any, any][]): CustomLevel[] {
   return rawEntries.map(([, value]) => {
     const obj = value?.toJSON?.() ?? value;
     return {
-      name: String(obj.name ?? ''),
+      name: decodeChainString(obj.name),
       threshold: BigInt(String(obj.threshold ?? 0)),
       discountRate: Number(obj.discountRate ?? obj.discount_rate ?? 0),
       commissionBonus: Number(obj.commissionBonus ?? obj.commission_bonus ?? 0),

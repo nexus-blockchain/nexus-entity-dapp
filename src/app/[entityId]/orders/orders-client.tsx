@@ -3,13 +3,14 @@
 import React, { useState, useCallback } from 'react';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useBuyerOrders } from '@/hooks/use-orders';
+import { useChainConstants } from '@/hooks/use-chain-constants';
 import { useCurrentBlock } from '@/hooks/use-current-block';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { EscrowStatusSection } from '@/components/order/escrow-status-section';
 import { DisputeNotice } from '@/components/order/dispute-notice';
 import { OrderTimeoutWarning } from '@/components/order/order-timeout-warning';
 import { OrderStatus, PaymentAsset, ProductCategory } from '@/lib/types/enums';
-import { getValidOrderTransitions } from '@/lib/utils';
+import { getBuyerOrderActions, getDerivedOrderStage, isServiceLikeCategory } from '@/lib/utils';
 import type { OrderData } from '@/lib/types/models';
 
 import { useTranslations } from 'next-intl';
@@ -18,6 +19,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -32,15 +34,14 @@ const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {
   [OrderStatus.Created]: 'bg-gray-100 text-gray-800',
   [OrderStatus.Paid]: 'bg-blue-100 text-blue-800',
   [OrderStatus.Shipped]: 'bg-indigo-100 text-indigo-800',
-  [OrderStatus.ServiceStarted]: 'bg-cyan-100 text-cyan-800',
-  [OrderStatus.ServiceCompleted]: 'bg-teal-100 text-teal-800',
-  [OrderStatus.Confirmed]: 'bg-emerald-100 text-emerald-800',
   [OrderStatus.Completed]: 'bg-green-100 text-green-800',
-  [OrderStatus.RefundRequested]: 'bg-orange-100 text-orange-800',
-  [OrderStatus.Refunded]: 'bg-yellow-100 text-yellow-800',
-  [OrderStatus.Disputed]: 'bg-red-100 text-red-800',
   [OrderStatus.Cancelled]: 'bg-gray-100 text-gray-600',
+  [OrderStatus.Disputed]: 'bg-red-100 text-red-800',
+  [OrderStatus.Refunded]: 'bg-yellow-100 text-yellow-800',
   [OrderStatus.Expired]: 'bg-gray-100 text-gray-500',
+  [OrderStatus.Processing]: 'bg-cyan-100 text-cyan-800',
+  [OrderStatus.AwaitingConfirmation]: 'bg-teal-100 text-teal-800',
+  [OrderStatus.PartiallyRefunded]: 'bg-orange-100 text-orange-800',
 };
 
 function formatNexBalance(balance: bigint): string {
@@ -50,6 +51,21 @@ function formatNexBalance(balance: bigint): string {
   const decStr = remainder.toString().padStart(12, '0').slice(0, 4);
   const trimmed = decStr.replace(/0+$/, '');
   return trimmed ? `${whole.toLocaleString()}.${trimmed}` : whole.toLocaleString();
+}
+
+function nexAmountToChain(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return '0';
+  const parts = trimmed.split('.');
+  const whole = parts[0] || '0';
+  const frac = (parts[1] || '').padEnd(12, '0').slice(0, 12);
+  return (BigInt(whole) * BigInt(1_000_000_000_000) + BigInt(frac)).toString();
+}
+
+function isPositiveAmountInput(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed || !/^\d+(\.\d+)?$/.test(trimmed)) return false;
+  return BigInt(nexAmountToChain(trimmed)) > 0n;
 }
 
 // ─── Loading Skeleton ───────────────────────────────────────
@@ -101,18 +117,31 @@ function PlaceOrderForm() {
   const { placeOrder } = useBuyerOrders();
 
   const [form, setForm] = useState({
-    shopId: '',
     productId: '',
     quantity: '1',
+    shippingCid: '',
+    useTokens: false,
+    tokenAmount: '',
     paymentAsset: PaymentAsset.Native as PaymentAsset,
     useShoppingBalance: false,
+    shoppingBalanceAmount: '',
+    noteCid: '',
     referrer: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const setField = useCallback((key: string, value: string | boolean) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'paymentAsset' && value === PaymentAsset.EntityToken) {
+        next.useTokens = false;
+        next.tokenAmount = '';
+        next.useShoppingBalance = false;
+        next.shoppingBalanceAmount = '';
+      }
+      return next;
+    });
     setErrors((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -123,21 +152,30 @@ function PlaceOrderForm() {
   const validate = useCallback((): boolean => {
     const fieldErrors: Record<string, string> = {};
 
-    const shopId = Number(form.shopId);
-    if (!Number.isInteger(shopId) || shopId <= 0) fieldErrors.shopId = t('validShopId');
-
     const productId = Number(form.productId);
     if (!Number.isInteger(productId) || productId <= 0) fieldErrors.productId = t('validProductId');
 
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) fieldErrors.quantity = t('validQuantity');
 
+    if (form.paymentAsset === PaymentAsset.Native && form.useTokens && !isPositiveAmountInput(form.tokenAmount)) {
+      fieldErrors.tokenAmount = t('validTokenAmount');
+    }
+
+    if (
+      form.paymentAsset === PaymentAsset.Native &&
+      form.useShoppingBalance &&
+      !isPositiveAmountInput(form.shoppingBalanceAmount)
+    ) {
+      fieldErrors.shoppingBalanceAmount = t('validShoppingBalanceAmount');
+    }
+
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
       return false;
     }
     return true;
-  }, [form]);
+  }, [form, t]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -150,18 +188,31 @@ function PlaceOrderForm() {
   );
 
   const handleConfirmOrder = useCallback(() => {
-    const shopId = Number(form.shopId);
     const productId = Number(form.productId);
     const quantity = Number(form.quantity);
+    const shippingCid = form.shippingCid.trim() || null;
+    const noteCid = form.noteCid.trim() || null;
     const referrer = form.referrer.trim() || null;
+    const useTokens = form.paymentAsset === PaymentAsset.Native && form.useTokens
+      ? nexAmountToChain(form.tokenAmount)
+      : null;
+    const useShoppingBalance = form.paymentAsset === PaymentAsset.Native && form.useShoppingBalance
+      ? nexAmountToChain(form.shoppingBalanceAmount)
+      : null;
 
+    // Pallet: place_order(product_id, quantity, shipping_cid, use_tokens, use_shopping_balance,
+    //                      payment_asset, note_cid, referrer, max_nex_amount, max_token_amount)
     placeOrder.mutate([
-      shopId,
       productId,
       quantity,
+      shippingCid,
+      useTokens,
+      useShoppingBalance,
       form.paymentAsset,
-      form.useShoppingBalance,
+      noteCid,
       referrer,
+      null, // max_nex_amount
+      null, // max_token_amount
     ]);
     setShowConfirmDialog(false);
   }, [form, placeOrder]);
@@ -177,21 +228,9 @@ function PlaceOrderForm() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="order-shop-id">{t('shopId')}</Label>
-                <Input
-                  id="order-shop-id"
-                  type="number"
-                  min="1"
-                  value={form.shopId}
-                  onChange={(e) => setField('shopId', e.target.value)}
-                  required
-                />
-                {errors.shopId && <p className="text-xs text-destructive">{errors.shopId}</p>}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="order-product-id">{t('productId')}</Label>
+                <LabelWithTip htmlFor="order-product-id" tip={t('help.productId')}>{t('productId')}</LabelWithTip>
                 <Input
                   id="order-product-id"
                   type="number"
@@ -203,11 +242,12 @@ function PlaceOrderForm() {
                 {errors.productId && <p className="text-xs text-destructive">{errors.productId}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="order-quantity">{t('quantity')}</Label>
+                <LabelWithTip htmlFor="order-quantity" tip={t('help.quantity')}>{t('quantity')}</LabelWithTip>
                 <Input
                   id="order-quantity"
                   type="number"
                   min="1"
+                  step="1"
                   value={form.quantity}
                   onChange={(e) => setField('quantity', e.target.value)}
                   required
@@ -218,7 +258,7 @@ function PlaceOrderForm() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>{t('paymentMethod')}</Label>
+                <LabelWithTip tip={t('help.paymentMethod')}>{t('paymentMethod')}</LabelWithTip>
                 <Select
                   value={String(form.paymentAsset)}
                   onValueChange={(value) => setField('paymentAsset', value)}
@@ -233,7 +273,7 @@ function PlaceOrderForm() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="order-referrer">{t('referrerAddress')}</Label>
+                <LabelWithTip htmlFor="order-referrer" tip={t('help.referrerAddress')}>{t('referrerAddress')}</LabelWithTip>
                 <Input
                   id="order-referrer"
                   type="text"
@@ -244,14 +284,97 @@ function PlaceOrderForm() {
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="use-shopping-balance"
-                checked={form.useShoppingBalance}
-                onCheckedChange={(checked) => setField('useShoppingBalance', checked)}
-              />
-              <Label htmlFor="use-shopping-balance">{t('useShoppingBalance')}</Label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="order-shipping-cid">{t('shippingCid') ?? 'Shipping CID'}</Label>
+                <Input
+                  id="order-shipping-cid"
+                  type="text"
+                  value={form.shippingCid}
+                  onChange={(e) => setField('shippingCid', e.target.value)}
+                  placeholder="Qm..."
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="order-note-cid">{t('noteCid') ?? 'Note CID'}</Label>
+                <Input
+                  id="order-note-cid"
+                  type="text"
+                  value={form.noteCid}
+                  onChange={(e) => setField('noteCid', e.target.value)}
+                  placeholder="Qm..."
+                  className="font-mono text-sm"
+                />
+              </div>
             </div>
+
+            {form.paymentAsset === PaymentAsset.Native ? (
+              <div className="space-y-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="use-shopping-balance"
+                      checked={form.useShoppingBalance}
+                      onCheckedChange={(checked) => setField('useShoppingBalance', checked)}
+                    />
+                    <LabelWithTip htmlFor="use-shopping-balance" tip={t('help.useShoppingBalance')}>{t('useShoppingBalance')}</LabelWithTip>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="use-tokens"
+                      checked={form.useTokens}
+                      onCheckedChange={(checked) => setField('useTokens', checked)}
+                    />
+                    <LabelWithTip htmlFor="use-tokens" tip={t('help.useTokens')}>{t('useTokens')}</LabelWithTip>
+                  </div>
+                </div>
+
+                {(form.useShoppingBalance || form.useTokens) && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {form.useShoppingBalance && (
+                      <div className="space-y-2">
+                        <LabelWithTip htmlFor="shopping-balance-amount" tip={t('help.shoppingBalanceAmount')}>
+                          {t('shoppingBalanceAmount')}
+                        </LabelWithTip>
+                        <Input
+                          id="shopping-balance-amount"
+                          type="text"
+                          inputMode="decimal"
+                          value={form.shoppingBalanceAmount}
+                          onChange={(e) => setField('shoppingBalanceAmount', e.target.value)}
+                          placeholder={t('shoppingBalanceAmountPlaceholder')}
+                        />
+                        {errors.shoppingBalanceAmount && (
+                          <p className="text-xs text-destructive">{errors.shoppingBalanceAmount}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {form.useTokens && (
+                      <div className="space-y-2">
+                        <LabelWithTip htmlFor="token-amount" tip={t('help.tokenAmount')}>
+                          {t('tokenAmount')}
+                        </LabelWithTip>
+                        <Input
+                          id="token-amount"
+                          type="text"
+                          inputMode="decimal"
+                          value={form.tokenAmount}
+                          onChange={(e) => setField('tokenAmount', e.target.value)}
+                          placeholder={t('tokenAmountPlaceholder')}
+                        />
+                        {errors.tokenAmount && (
+                          <p className="text-xs text-destructive">{errors.tokenAmount}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('loyaltyDeductionNativeOnly')}</p>
+            )}
 
             <Separator />
 
@@ -297,41 +420,43 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
   const tc = useTranslations('common');
   const te = useTranslations('enums');
   const { isReadOnly, isSuspended } = useEntityContext();
-  const { confirmReceipt, requestRefund, cancelOrder, confirmServiceCompletion } = useBuyerOrders();
+  const { confirmReceipt, requestRefund, cancelOrder, confirmService } = useBuyerOrders();
   const statusColor = ORDER_STATUS_COLOR[order.status];
   const canAct = !isReadOnly && !isSuspended;
 
-  const category = order.productCategory ?? ProductCategory.Physical;
-  const validTransitions = getValidOrderTransitions(category, order.status);
+  const buyerActions = getBuyerOrderActions(order);
+  const derivedStage = getDerivedOrderStage(order);
+  const statusLabel = derivedStage
+    ? t(derivedStage)
+    : te(`orderStatus.${order.status}`);
+  const isServiceLike = isServiceLikeCategory(order.productCategory ?? ProductCategory.Physical);
 
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; description: string; onConfirm: () => void } | null>(null);
+  const [refundReasonDialog, setRefundReasonDialog] = useState(false);
+  const [refundReasonCid, setRefundReasonCid] = useState('');
 
-  const BUYER_TRANSITION_LABEL: Partial<Record<OrderStatus, string>> = {
-    [OrderStatus.Completed]: t('confirmReceipt'),
-    [OrderStatus.Confirmed]: t('confirmServiceCompletion'),
-  };
-
-  const handleTransition = useCallback((target: OrderStatus) => {
-    switch (target) {
-      case OrderStatus.Completed:
+  const handleAction = useCallback((action: 'confirmReceipt' | 'confirmService') => {
+    switch (action) {
+      case 'confirmReceipt':
         confirmReceipt.mutate([order.id]);
-        break;
-      case OrderStatus.Confirmed:
-        confirmServiceCompletion.mutate([order.id]);
-        break;
+        return;
+      case 'confirmService':
+        confirmService.mutate([order.id]);
+        return;
     }
-  }, [order.id, confirmReceipt, confirmServiceCompletion]);
+  }, [order.id, confirmReceipt, confirmService]);
 
   const handleRequestRefund = useCallback(() => {
-    setConfirmDialog({
-      title: t('requestRefund'),
-      description: t('orderNumber', { id: order.id }),
-      onConfirm: () => {
-        requestRefund.mutate([order.id]);
-        setConfirmDialog(null);
-      },
-    });
-  }, [order.id, requestRefund, t]);
+    setRefundReasonCid('');
+    setRefundReasonDialog(true);
+  }, []);
+
+  const handleRefundConfirm = useCallback(() => {
+    if (!refundReasonCid.trim()) return;
+    // Pallet: request_refund(order_id, reason_cid: Vec<u8>) — reason_cid is required
+    requestRefund.mutate([order.id, refundReasonCid.trim()]);
+    setRefundReasonDialog(false);
+  }, [order.id, refundReasonCid, requestRefund]);
 
   const handleCancel = useCallback(() => {
     setConfirmDialog({
@@ -356,7 +481,7 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
               </CardDescription>
             </div>
             <Badge className={cn('shrink-0', statusColor)}>
-              {te(`orderStatus.${order.status}`)}
+              {statusLabel}
             </Badge>
           </div>
         </CardHeader>
@@ -365,6 +490,7 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
           <div className="space-y-1 text-sm text-muted-foreground">
             <p>{t('amount')}: {formatNexBalance(order.totalAmount)} {te(`paymentAsset.${order.paymentAsset}`)}</p>
             {order.escrowId != null && <p>{t('escrowId')}: {order.escrowId}</p>}
+            {isServiceLike && derivedStage && <p>{t('servicePhase')}: {t(derivedStage)}</p>}
           </div>
 
           {/* Escrow status display */}
@@ -385,26 +511,22 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
         {canAct && (
           <CardFooter className="flex-col items-start gap-2">
             <div className="flex flex-wrap gap-2">
-              {validTransitions.map((target) => {
-                const label = BUYER_TRANSITION_LABEL[target];
-                if (!label) return null;
-                return (
-                  <Button
-                    key={target}
-                    size="sm"
-                    variant="default"
-                    onClick={() => handleTransition(target)}
-                  >
-                    {label}
-                  </Button>
-                );
-              })}
-              {(order.status === OrderStatus.Paid || order.status === OrderStatus.Shipped) && (
+              {buyerActions.includes('confirmReceipt') && (
+                <Button size="sm" variant="default" onClick={() => handleAction('confirmReceipt')}>
+                  {t('confirmReceipt')}
+                </Button>
+              )}
+              {buyerActions.includes('confirmService') && (
+                <Button size="sm" variant="default" onClick={() => handleAction('confirmService')}>
+                  {t('confirmServiceCompletion')}
+                </Button>
+              )}
+              {buyerActions.includes('requestRefund') && (
                 <Button size="sm" variant="outline" className="border-orange-300 text-orange-600 hover:bg-orange-50" onClick={handleRequestRefund}>
                   {t('requestRefund')}
                 </Button>
               )}
-              {order.status === OrderStatus.Created && (
+              {buyerActions.includes('cancelOrder') && (
                 <Button size="sm" variant="ghost" onClick={handleCancel}>
                   {t('cancelOrder')}
                 </Button>
@@ -412,7 +534,7 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
             </div>
             <div>
               <TxStatusIndicator txState={confirmReceipt.txState} />
-              <TxStatusIndicator txState={confirmServiceCompletion.txState} />
+              <TxStatusIndicator txState={confirmService.txState} />
               <TxStatusIndicator txState={requestRefund.txState} />
               <TxStatusIndicator txState={cancelOrder.txState} />
             </div>
@@ -432,6 +554,30 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Refund reason CID dialog */}
+      <Dialog open={refundReasonDialog} onOpenChange={setRefundReasonDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('requestRefund')}</DialogTitle>
+            <DialogDescription>{t('orderNumber', { id: order.id })}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor={`refund-reason-${order.id}`}>{tc('reasonCidLabel') || 'Reason CID'}</Label>
+            <Input
+              id={`refund-reason-${order.id}`}
+              value={refundReasonCid}
+              onChange={(e) => setRefundReasonCid(e.target.value)}
+              placeholder={tc('reasonCidPlaceholder') || 'Qm...'}
+              className="font-mono text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRefundReasonDialog(false)}>{tc('cancel')}</Button>
+            <Button variant="destructive" onClick={handleRefundConfirm} disabled={!refundReasonCid.trim()}>{tc('confirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -441,8 +587,14 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
 export function BuyerOrdersPage() {
   const t = useTranslations('orders');
   const tc = useTranslations('common');
-  const { orders, isLoading, error } = useBuyerOrders();
+  const { orders, orderIndexCount, isLoading, error, cleanupBuyerOrders } = useBuyerOrders();
+  const { entityOrder } = useChainConstants();
   const currentBlock = useCurrentBlock();
+
+  const maxBuyerOrders = entityOrder?.maxBuyerOrders ?? 0;
+  const isFull = maxBuyerOrders > 0 && orderIndexCount >= maxBuyerOrders;
+  const isNearFull = maxBuyerOrders > 0 && orderIndexCount >= maxBuyerOrders * 0.8;
+  const isBusy = cleanupBuyerOrders.txState.status === 'signing' || cleanupBuyerOrders.txState.status === 'broadcasting';
 
   if (isLoading) {
     return <OrdersSkeleton />;
@@ -465,6 +617,38 @@ export function BuyerOrdersPage() {
       <h1 className="text-2xl font-bold tracking-tight">{t('title')}</h1>
 
       <PlaceOrderForm />
+
+      {isNearFull && (
+        <Card className={cn(
+          'border',
+          isFull ? 'border-destructive bg-destructive/5' : 'border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20',
+        )}>
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div className="space-y-1">
+              <p className={cn('text-sm font-medium', isFull ? 'text-destructive' : 'text-yellow-700 dark:text-yellow-400')}>
+                {isFull ? t('indexFull') : t('indexNearFull')}
+              </p>
+              {maxBuyerOrders > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t('indexUsage', { count: String(orderIndexCount), max: String(maxBuyerOrders) })}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">{t('cleanupDesc')}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant={isFull ? 'destructive' : 'outline'}
+                size="sm"
+                disabled={isBusy}
+                onClick={() => cleanupBuyerOrders.mutate([])}
+              >
+                {t('cleanupOrders')}
+              </Button>
+              <TxStatusIndicator txState={cleanupBuyerOrders.txState} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {orders.length === 0 ? (
         <Card className="border-dashed">

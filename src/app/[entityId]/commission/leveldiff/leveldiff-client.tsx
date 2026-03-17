@@ -12,7 +12,7 @@ import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -111,7 +111,7 @@ function ConfigSection() {
           <form onSubmit={handleSaveConfig} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="ld-level-rates">{t('levelRates')}</Label>
+                <LabelWithTip htmlFor="ld-level-rates" tip={t('help.levelRates')}>{t('levelRates')}</LabelWithTip>
                 <Input
                   id="ld-level-rates"
                   type="text"
@@ -122,7 +122,7 @@ function ConfigSection() {
                 <p className="text-xs text-muted-foreground">{t('levelRatesDesc')}</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="ld-max-depth">{t('maxDepth')}</Label>
+                <LabelWithTip htmlFor="ld-max-depth" tip={t('help.maxDepth')}>{t('maxDepth')}</LabelWithTip>
                 <Input
                   id="ld-max-depth"
                   type="number"
@@ -156,40 +156,15 @@ function ConfigSection() {
   );
 }
 
-// ─── Stats Section ──────────────────────────────────────────
-
-function StatsSection() {
+function RuntimeNoticeSection() {
   const t = useTranslations('levelDiff');
-  const { stats } = useLevelDiffCommission();
 
   return (
-    <Card>
+    <Card className="border-dashed">
       <CardHeader>
         <CardTitle className="text-lg">{t('statsSection')}</CardTitle>
-        <CardDescription>{t('statsSectionDesc')}</CardDescription>
+        <CardDescription>{t('runtimeDerivedOnly')}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalDistributed')}</p>
-              <p className="text-lg font-semibold">{stats?.totalDistributed?.toString() ?? '0'}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('activeLevels')}</p>
-              <p className="text-lg font-semibold">{stats?.activeLevels ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('maxLevelReached')}</p>
-              <p className="text-lg font-semibold">{stats?.maxLevelReached ?? 0}</p>
-            </CardContent>
-          </Card>
-        </div>
-      </CardContent>
     </Card>
   );
 }
@@ -227,7 +202,7 @@ export function LevelDiffPage() {
       </div>
 
       <ConfigSection />
-      <StatsSection />
+      <RuntimeNoticeSection />
     </div>
   );
 }

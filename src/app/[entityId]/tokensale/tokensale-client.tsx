@@ -7,32 +7,35 @@ import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { useTokensale, computeDutchAuctionPrice } from '@/hooks/use-tokensale';
 import { AdminPermission } from '@/lib/types/models';
+import { SaleMode } from '@/lib/types/enums';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { LabelWithTip } from '@/components/field-help-tip';
+import { formatNex } from '@/lib/utils/format';
 
-const STATUS_VARIANT: Record<string, 'secondary' | 'default' | 'warning' | 'destructive' | 'success'> = {
-  Created: 'secondary',
-  Started: 'default',
-  Subscribing: 'warning',
+const STATUS_VARIANT: Record<string, 'secondary' | 'default' | 'warning' | 'destructive' | 'success' | 'outline'> = {
+  NotStarted: 'secondary',
+  Active: 'default',
   Ended: 'destructive',
-  Claiming: 'success',
+  Cancelled: 'outline',
+  Completed: 'success',
+  Paused: 'warning',
 };
 
 type SaleRoundFormKey =
-  | 'name'
+  | 'mode'
   | 'totalSupply'
-  | 'price'
   | 'startBlock'
   | 'endBlock'
-  | 'minPurchase'
-  | 'maxPurchase'
-  | 'softCap'
-  | 'hardCap';
+  | 'kycRequired'
+  | 'minKycLevel'
+  | 'softCap';
 
 function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
@@ -91,15 +94,13 @@ function CreateSaleRoundForm() {
   const { createSaleRound } = useTokensale();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<SaleRoundFormKey, string>>({
-    name: '',
+    mode: SaleMode.FixedPrice,
     totalSupply: '',
-    price: '',
     startBlock: '',
     endBlock: '',
-    minPurchase: '',
-    maxPurchase: '',
+    kycRequired: '',
+    minKycLevel: '0',
     softCap: '',
-    hardCap: '',
   });
 
   const setField = useCallback((key: SaleRoundFormKey, value: string) => {
@@ -108,30 +109,27 @@ function CreateSaleRoundForm() {
 
   const handleSubmit = useCallback(() => {
     const {
-      name,
+      mode,
       totalSupply,
-      price,
       startBlock,
       endBlock,
-      minPurchase,
-      maxPurchase,
+      kycRequired,
+      minKycLevel,
       softCap,
-      hardCap,
     } = form;
 
-    if (!name.trim() || !totalSupply || !price) return;
+    if (!mode.trim() || !totalSupply) return;
 
+    // Pallet: create_sale_round(entity_id, mode, total_supply, start_block, end_block, kyc_required, min_kyc_level, soft_cap)
     createSaleRound.mutate([
       entityId,
-      name.trim(),
+      mode.trim(),
       totalSupply,
-      price,
       Number(startBlock),
       Number(endBlock),
-      minPurchase,
-      maxPurchase,
-      softCap,
-      hardCap,
+      kycRequired === 'true',
+      Number(minKycLevel),
+      softCap || '0',
     ]);
   }, [createSaleRound, entityId, form]);
 
@@ -140,15 +138,12 @@ function CreateSaleRoundForm() {
   }
 
   const fields: Array<{ key: SaleRoundFormKey; label: string; type: string; placeholder: string }> = [
-    { key: 'name', label: t('roundName'), type: 'text', placeholder: t('roundNamePlaceholder') },
     { key: 'totalSupply', label: t('totalSupply'), type: 'text', placeholder: t('totalSupply') },
-    { key: 'price', label: t('price'), type: 'text', placeholder: t('price') },
     { key: 'startBlock', label: t('startBlock'), type: 'number', placeholder: t('startBlock') },
     { key: 'endBlock', label: t('endBlock'), type: 'number', placeholder: t('endBlock') },
-    { key: 'minPurchase', label: t('minPurchase'), type: 'text', placeholder: t('minPurchase') },
-    { key: 'maxPurchase', label: t('maxPurchase'), type: 'text', placeholder: t('maxPurchase') },
+    { key: 'kycRequired', label: t('kycRequired'), type: 'text', placeholder: 'true / false' },
+    { key: 'minKycLevel', label: t('minKycLevel'), type: 'number', placeholder: '0' },
     { key: 'softCap', label: t('softCap'), type: 'text', placeholder: t('softCap') },
-    { key: 'hardCap', label: t('hardCap'), type: 'text', placeholder: t('hardCap') },
   ];
 
   return (
@@ -158,6 +153,20 @@ function CreateSaleRoundForm() {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Sale Mode select */}
+          <div className="space-y-1.5">
+            <Label htmlFor="sale-mode">{t('saleMode')}</Label>
+            <Select value={form.mode} onValueChange={(v) => setField('mode', v)}>
+              <SelectTrigger id="sale-mode">
+                <SelectValue placeholder={t('saleMode')} />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.values(SaleMode).map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {fields.map(({ key, label, type, placeholder }) => (
             <div key={key} className="space-y-1.5">
               <Label htmlFor={`sale-${key}`}>{label}</Label>
@@ -173,7 +182,7 @@ function CreateSaleRoundForm() {
         </div>
       </CardContent>
       <CardFooter className="gap-3">
-        <Button onClick={handleSubmit} disabled={!form.name.trim() || isTxBusy(createSaleRound)}>
+        <Button onClick={handleSubmit} disabled={!form.mode.trim() || isTxBusy(createSaleRound)}>
           {tc('submit')}
         </Button>
         <Button variant="outline" onClick={() => setOpen(false)}>
@@ -187,7 +196,6 @@ function CreateSaleRoundForm() {
 
 function DutchAuctionSection() {
   const t = useTranslations('tokensale');
-  const { entityId } = useEntityContext();
   const { configureDutchAuction } = useTokensale();
   const [roundId, setRoundId] = useState('');
   const [startPrice, setStartPrice] = useState('');
@@ -198,19 +206,18 @@ function DutchAuctionSection() {
   const calculatedPrice =
     startPrice && endPrice && decayBlocks && elapsed
       ? computeDutchAuctionPrice(
-          {
-            startPrice: BigInt(startPrice),
-            endPrice: BigInt(endPrice),
-            decayBlocks: Number(decayBlocks),
-          },
+          BigInt(startPrice),
+          BigInt(endPrice),
+          Number(decayBlocks),
           Number(elapsed),
         ).toString()
       : null;
 
   const handleSubmit = useCallback(() => {
-    if (!roundId || !startPrice || !endPrice || !decayBlocks) return;
-    configureDutchAuction.mutate([entityId, Number(roundId), startPrice, endPrice, Number(decayBlocks)]);
-  }, [configureDutchAuction, decayBlocks, endPrice, entityId, roundId, startPrice]);
+    if (!roundId || !startPrice || !endPrice) return;
+    // Pallet: configure_dutch_auction(round_id, start_price, end_price)
+    configureDutchAuction.mutate([Number(roundId), startPrice, endPrice]);
+  }, [configureDutchAuction, endPrice, roundId, startPrice]);
 
   return (
     <Card>
@@ -220,19 +227,19 @@ function DutchAuctionSection() {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="space-y-1.5">
-            <Label htmlFor="da-round">{t('roundId')}</Label>
+            <LabelWithTip htmlFor="da-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
             <Input id="da-round" type="number" value={roundId} onChange={(e) => setRoundId(e.target.value)} placeholder={t('roundId')} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="da-start">{t('startPrice')}</Label>
+            <LabelWithTip htmlFor="da-start" tip={t('help.startPrice')}>{t('startPrice')}</LabelWithTip>
             <Input id="da-start" value={startPrice} onChange={(e) => setStartPrice(e.target.value)} placeholder={t('startPrice')} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="da-end">{t('endPrice')}</Label>
+            <LabelWithTip htmlFor="da-end" tip={t('help.endPrice')}>{t('endPrice')}</LabelWithTip>
             <Input id="da-end" value={endPrice} onChange={(e) => setEndPrice(e.target.value)} placeholder={t('endPrice')} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="da-decay">{t('decayBlocks')}</Label>
+            <LabelWithTip htmlFor="da-decay" tip={t('help.decayBlocks')}>{t('decayBlocks')}</LabelWithTip>
             <Input
               id="da-decay"
               type="number"
@@ -272,16 +279,26 @@ function DutchAuctionSection() {
 
 function VestingSection() {
   const t = useTranslations('tokensale');
-  const { entityId } = useEntityContext();
-  const { configureVesting } = useTokensale();
+  const { setVestingConfig } = useTokensale();
   const [roundId, setRoundId] = useState('');
-  const [cliffBlocks, setCliffBlocks] = useState('');
-  const [vestingBlocks, setVestingBlocks] = useState('');
+  const [vestingType, setVestingType] = useState('');
+  const [initialUnlockBps, setInitialUnlockBps] = useState('');
+  const [cliffDuration, setCliffDuration] = useState('');
+  const [totalDuration, setTotalDuration] = useState('');
+  const [unlockInterval, setUnlockInterval] = useState('');
 
   const handleSubmit = useCallback(() => {
-    if (!roundId || !cliffBlocks || !vestingBlocks) return;
-    configureVesting.mutate([entityId, Number(roundId), Number(cliffBlocks), Number(vestingBlocks)]);
-  }, [cliffBlocks, configureVesting, entityId, roundId, vestingBlocks]);
+    if (!roundId || !vestingType) return;
+    // Pallet: set_vesting_config(round_id, vesting_type, initial_unlock_bps, cliff_duration, total_duration, unlock_interval)
+    setVestingConfig.mutate([
+      Number(roundId),
+      vestingType.trim(),
+      Number(initialUnlockBps || '0'),
+      Number(cliffDuration || '0'),
+      Number(totalDuration || '0'),
+      Number(unlockInterval || '0'),
+    ]);
+  }, [setVestingConfig, roundId, vestingType, initialUnlockBps, cliffDuration, totalDuration, unlockInterval]);
 
   return (
     <Card>
@@ -291,36 +308,54 @@ function VestingSection() {
       <CardContent>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
-            <Label htmlFor="vest-round">{t('roundId')}</Label>
+            <LabelWithTip htmlFor="vest-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
             <Input id="vest-round" type="number" value={roundId} onChange={(e) => setRoundId(e.target.value)} placeholder={t('roundId')} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="vest-cliff">{t('cliffPeriod')}</Label>
+            <Label htmlFor="vest-type">{t('vestingType')}</Label>
+            <Input id="vest-type" value={vestingType} onChange={(e) => setVestingType(e.target.value)} placeholder={t('vestingTypePlaceholder')} />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="vest-initial-unlock" tip={t('help.initialUnlockBps')}>{t('initialUnlockBps')}</LabelWithTip>
+            <Input id="vest-initial-unlock" type="number" value={initialUnlockBps} onChange={(e) => setInitialUnlockBps(e.target.value)} placeholder={t('initialUnlockBps')} />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="vest-cliff" tip={t('help.cliffPeriod')}>{t('cliffPeriod')}</LabelWithTip>
             <Input
               id="vest-cliff"
               type="number"
-              value={cliffBlocks}
-              onChange={(e) => setCliffBlocks(e.target.value)}
+              value={cliffDuration}
+              onChange={(e) => setCliffDuration(e.target.value)}
               placeholder={t('cliffPeriod')}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="vest-period">{t('vestingPeriod')}</Label>
+            <LabelWithTip htmlFor="vest-total" tip={t('help.totalDuration')}>{t('totalDuration')}</LabelWithTip>
             <Input
-              id="vest-period"
+              id="vest-total"
               type="number"
-              value={vestingBlocks}
-              onChange={(e) => setVestingBlocks(e.target.value)}
-              placeholder={t('vestingPeriod')}
+              value={totalDuration}
+              onChange={(e) => setTotalDuration(e.target.value)}
+              placeholder={t('totalDuration')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="vest-interval" tip={t('help.unlockInterval')}>{t('unlockInterval')}</LabelWithTip>
+            <Input
+              id="vest-interval"
+              type="number"
+              value={unlockInterval}
+              onChange={(e) => setUnlockInterval(e.target.value)}
+              placeholder={t('unlockInterval')}
             />
           </div>
         </div>
       </CardContent>
       <CardFooter className="gap-3">
-        <Button onClick={handleSubmit} disabled={isTxBusy(configureVesting)}>
+        <Button onClick={handleSubmit} disabled={isTxBusy(setVestingConfig)}>
           {t('configureVesting')}
         </Button>
-        <TxStatusIndicator txState={configureVesting.txState} />
+        <TxStatusIndicator txState={setVestingConfig.txState} />
       </CardFooter>
     </Card>
   );
@@ -328,7 +363,6 @@ function VestingSection() {
 
 function SubscribeSection() {
   const t = useTranslations('tokensale');
-  const { entityId } = useEntityContext();
   const { subscribe, increaseSubscription } = useTokensale();
   const [roundId, setRoundId] = useState('');
   const [amount, setAmount] = useState('');
@@ -336,15 +370,17 @@ function SubscribeSection() {
 
   const handleSubscribe = useCallback(() => {
     if (!roundId || !amount) return;
-    subscribe.mutate([entityId, Number(roundId), amount]);
+    // Pallet: subscribe(round_id, amount, payment_asset)
+    subscribe.mutate([Number(roundId), amount, null]);
     setAmount('');
-  }, [amount, entityId, roundId, subscribe]);
+  }, [amount, roundId, subscribe]);
 
   const handleIncrease = useCallback(() => {
     if (!roundId || !increaseAmt) return;
-    increaseSubscription.mutate([entityId, Number(roundId), increaseAmt]);
+    // Pallet: increase_subscription(round_id, additional_amount, payment_asset)
+    increaseSubscription.mutate([Number(roundId), increaseAmt, null]);
     setIncreaseAmt('');
-  }, [entityId, increaseAmt, increaseSubscription, roundId]);
+  }, [increaseAmt, increaseSubscription, roundId]);
 
   return (
     <Card>
@@ -353,7 +389,7 @@ function SubscribeSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="sub-round">{t('roundId')}</Label>
+          <LabelWithTip htmlFor="sub-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
           <Input
             id="sub-round"
             type="number"
@@ -370,7 +406,7 @@ function SubscribeSection() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="sub-amount">{t('subscriptionAmount')}</Label>
+                <LabelWithTip htmlFor="sub-amount" tip={t('help.subscriptionAmount')}>{t('subscriptionAmount')}</LabelWithTip>
                 <Input
                   id="sub-amount"
                   value={amount}
@@ -416,22 +452,23 @@ function SubscribeSection() {
 
 function WhitelistSection() {
   const t = useTranslations('tokensale');
-  const { entityId } = useEntityContext();
   const { addToWhitelist, removeFromWhitelist } = useTokensale();
   const [roundId, setRoundId] = useState('');
   const [account, setAccount] = useState('');
 
   const handleAdd = useCallback(() => {
     if (!roundId || !account.trim()) return;
-    addToWhitelist.mutate([entityId, Number(roundId), account.trim()]);
+    // Pallet: add_to_whitelist(round_id, accounts) where accounts = Vec<(AccountId, Option<Balance>)>
+    addToWhitelist.mutate([Number(roundId), [[account.trim(), null]]]);
     setAccount('');
-  }, [account, addToWhitelist, entityId, roundId]);
+  }, [account, addToWhitelist, roundId]);
 
   const handleRemove = useCallback(() => {
     if (!roundId || !account.trim()) return;
-    removeFromWhitelist.mutate([entityId, Number(roundId), account.trim()]);
+    // Pallet: remove_from_whitelist(round_id, accounts) where accounts = Vec<AccountId>
+    removeFromWhitelist.mutate([Number(roundId), [account.trim()]]);
     setAccount('');
-  }, [account, entityId, removeFromWhitelist, roundId]);
+  }, [account, removeFromWhitelist, roundId]);
 
   return (
     <Card>
@@ -441,7 +478,7 @@ function WhitelistSection() {
       <CardContent>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
-            <Label htmlFor="wl-round">{t('roundId')}</Label>
+            <LabelWithTip htmlFor="wl-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
             <Input id="wl-round" type="number" value={roundId} onChange={(e) => setRoundId(e.target.value)} placeholder={t('roundId')} />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
@@ -466,8 +503,7 @@ function WhitelistSection() {
 
 function LifecycleActions() {
   const t = useTranslations('tokensale');
-  const { entityId } = useEntityContext();
-  const { startSaleRound, endSaleRound, claimTokens, unlockTokens, claimRefund } = useTokensale();
+  const { startSale, endSale, claimTokens, unlockTokens, claimRefund } = useTokensale();
   const [roundId, setRoundId] = useState('');
 
   return (
@@ -477,7 +513,7 @@ function LifecycleActions() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="lc-round">{t('roundId')}</Label>
+          <LabelWithTip htmlFor="lc-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
           <Input
             id="lc-round"
             type="number"
@@ -488,20 +524,20 @@ function LifecycleActions() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={() => roundId && startSaleRound.mutate([entityId, Number(roundId)])} disabled={!roundId || isTxBusy(startSaleRound)}>
+          <Button onClick={() => roundId && startSale.mutate([Number(roundId)])} disabled={!roundId || isTxBusy(startSale)}>
             {t('startRound')}
           </Button>
           <Button
             variant="destructive"
-            onClick={() => roundId && endSaleRound.mutate([entityId, Number(roundId)])}
-            disabled={!roundId || isTxBusy(endSaleRound)}
+            onClick={() => roundId && endSale.mutate([Number(roundId)])}
+            disabled={!roundId || isTxBusy(endSale)}
           >
             {t('endRound')}
           </Button>
           <Button
             variant="default"
             className="bg-green-600 text-white hover:bg-green-700"
-            onClick={() => roundId && claimTokens.mutate([entityId, Number(roundId)])}
+            onClick={() => roundId && claimTokens.mutate([Number(roundId)])}
             disabled={!roundId || isTxBusy(claimTokens)}
           >
             {t('claimTokens')}
@@ -509,19 +545,19 @@ function LifecycleActions() {
           <Button
             variant="secondary"
             className="bg-purple-600 text-white hover:bg-purple-700"
-            onClick={() => roundId && unlockTokens.mutate([entityId, Number(roundId)])}
+            onClick={() => roundId && unlockTokens.mutate([Number(roundId)])}
             disabled={!roundId || isTxBusy(unlockTokens)}
           >
             {t('unlockTokens')}
           </Button>
-          <Button variant="outline" onClick={() => roundId && claimRefund.mutate([entityId, Number(roundId)])} disabled={!roundId || isTxBusy(claimRefund)}>
+          <Button variant="outline" onClick={() => roundId && claimRefund.mutate([Number(roundId)])} disabled={!roundId || isTxBusy(claimRefund)}>
             {t('claimRefund')}
           </Button>
         </div>
       </CardContent>
       <CardFooter className="flex-wrap gap-3">
-        <TxStatusIndicator txState={startSaleRound.txState} />
-        <TxStatusIndicator txState={endSaleRound.txState} />
+        <TxStatusIndicator txState={startSale.txState} />
+        <TxStatusIndicator txState={endSale.txState} />
         <TxStatusIndicator txState={claimTokens.txState} />
         <TxStatusIndicator txState={unlockTokens.txState} />
         <TxStatusIndicator txState={claimRefund.txState} />
@@ -552,36 +588,29 @@ function SaleRoundsList() {
               <Card key={round.id} className="shadow-none">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">#{round.id} {round.name}</span>
+                    <span className="text-sm font-medium">#{round.id} [{round.mode}]</span>
                     <Badge variant={STATUS_VARIANT[round.status] ?? 'secondary'}>
-                      {te(`saleRoundStatus.${round.status}` as const)}
+                      {round.status}
                     </Badge>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
-                    <span>{t('priceLabel')}: {round.price.toString()}</span>
-                    <span>{t('totalSupplyLabel')}: {round.totalSupply.toString()}</span>
-                    <span>{t('totalRaised')}: {round.totalRaised.toString()}</span>
-                    <span>{t('participants')}: {round.participantCount}</span>
+                    <span>{t('totalSupplyLabel')}: {formatNex(round.totalSupply)}</span>
+                    <span>{t('soldAmount')}: {formatNex(round.soldAmount)}</span>
+                    <span>{t('remainingAmount')}: {formatNex(round.remainingAmount)}</span>
+                    <span>{t('participants')}: {round.participantsCount}</span>
                     <span>{t('blockRange')}: {round.startBlock}--{round.endBlock}</span>
-                    <span>{t('purchaseRange')}: {round.minPurchase.toString()}--{round.maxPurchase.toString()}</span>
-                    <span>{t('softCap')}: {round.softCap.toString()}</span>
-                    <span>{t('hardCap')}: {round.hardCap.toString()}</span>
+                    <span>{t('softCap')}: {formatNex(round.softCap)} NEX</span>
+                    <span>{t('kycRequired')}: {round.kycRequired ? 'Yes' : 'No'}</span>
+                    <span>{t('minKycLevel')}: {round.minKycLevel}</span>
                   </div>
-                  {round.dutchAuction && (
+                  {round.dutchStartPrice != null && round.dutchEndPrice != null && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {t('dutchAuctionValue', {
-                        start: round.dutchAuction.startPrice.toString(),
-                        end: round.dutchAuction.endPrice.toString(),
-                        blocks: round.dutchAuction.decayBlocks,
-                      })}
+                      {t('dutchAuction')}: {formatNex(round.dutchStartPrice)} → {formatNex(round.dutchEndPrice)}
                     </p>
                   )}
                   {round.vestingConfig && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {t('vestingLabel', {
-                        cliff: round.vestingConfig.cliffBlocks,
-                        vesting: round.vestingConfig.vestingBlocks,
-                      })}
+                      Vesting: {round.vestingConfig.vestingType}, cliff {round.vestingConfig.cliffDuration} blocks, total {round.vestingConfig.totalDuration} blocks
                     </p>
                   )}
                 </CardContent>
@@ -590,6 +619,67 @@ function SaleRoundsList() {
           </div>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+function PaymentOptionSection() {
+  const t = useTranslations('tokensale');
+  const tc = useTranslations('common');
+  const { addPaymentOption } = useTokensale();
+  const [roundId, setRoundId] = useState('');
+  const [assetId, setAssetId] = useState('');
+  const [price, setPrice] = useState('');
+  const [minPurchase, setMinPurchase] = useState('');
+  const [maxPurchasePerAccount, setMaxPurchasePerAccount] = useState('');
+
+  const handleSubmit = useCallback(() => {
+    if (!roundId || !price) return;
+    // Pallet: add_payment_option(round_id, asset_id, price, min_purchase, max_purchase_per_account)
+    addPaymentOption.mutate([
+      Number(roundId),
+      assetId.trim() ? Number(assetId) : null,
+      price,
+      minPurchase || '0',
+      maxPurchasePerAccount || '0',
+    ]);
+  }, [addPaymentOption, roundId, assetId, price, minPurchase, maxPurchasePerAccount]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('addPaymentOption')}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="po-round" tip={t('help.roundName')}>{t('roundId')}</LabelWithTip>
+            <Input id="po-round" type="number" value={roundId} onChange={(e) => setRoundId(e.target.value)} placeholder={t('roundId')} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="po-asset">{t('assetId')}</Label>
+            <Input id="po-asset" type="number" value={assetId} onChange={(e) => setAssetId(e.target.value)} placeholder={t('assetIdPlaceholder')} />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="po-price" tip={t('help.price')}>{t('price')}</LabelWithTip>
+            <Input id="po-price" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={t('price')} />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="po-min" tip={t('help.minPurchase')}>{t('minPurchase')}</LabelWithTip>
+            <Input id="po-min" value={minPurchase} onChange={(e) => setMinPurchase(e.target.value)} placeholder={t('minPurchase')} />
+          </div>
+          <div className="space-y-1.5">
+            <LabelWithTip htmlFor="po-max" tip={t('help.maxPurchase')}>{t('maxPurchasePerAccount')}</LabelWithTip>
+            <Input id="po-max" value={maxPurchasePerAccount} onChange={(e) => setMaxPurchasePerAccount(e.target.value)} placeholder={t('maxPurchasePerAccount')} />
+          </div>
+        </div>
+      </CardContent>
+      <CardFooter className="gap-3">
+        <Button onClick={handleSubmit} disabled={!roundId || !price || isTxBusy(addPaymentOption)}>
+          {tc('submit')}
+        </Button>
+        <TxStatusIndicator txState={addPaymentOption.txState} />
+      </CardFooter>
     </Card>
   );
 }
@@ -629,6 +719,7 @@ export function TokenSalePage() {
       <LifecycleActions />
 
       <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
+        <PaymentOptionSection />
         <DutchAuctionSection />
         <VestingSection />
         <WhitelistSection />

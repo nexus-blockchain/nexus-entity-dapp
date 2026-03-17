@@ -3,7 +3,7 @@
 import { useEntityQuery, hasPallet } from './use-entity-query';
 import { STALE_TIMES } from '@/lib/chain/constants';
 
-type RateSource = 'twap' | 'lastPrice' | 'initialPrice';
+type RateSource = 'twap' | 'lastPrice' | 'lastTradePrice';
 
 interface NexUsdtPriceResult {
   /** 1 USDT = how many NEX (chain precision 12 decimals). null if rate unavailable */
@@ -19,26 +19,28 @@ interface RateData {
 }
 
 /**
- * Lightweight hook to get NEX/USDT exchange rate for a given entity.
- * Priority: twapPrice > lastPrice > initialPrice.
- * All return 0 → rate unavailable (null).
+ * Lightweight hook to get global NEX/USDT exchange rate.
+ * Priority: marketStatsStore.twapPrice > marketStatsStore.lastPrice > lastTradePrice/depositExchangeRate.
+ * `_entityId` is kept only for backward compatibility with existing callers.
  */
-export function useNexUsdtPrice(entityId: number): NexUsdtPriceResult {
+export function useNexUsdtPrice(_entityId?: number): NexUsdtPriceResult {
   const query = useEntityQuery<RateData | null>(
-    ['entity', entityId, 'nexPrice', 'rate'],
+    ['nexPrice', 'rate'],
     async (api) => {
       if (!hasPallet(api, 'nexMarket')) return null;
       const pallet = (api.query as any).nexMarket;
 
-      // 1. Try marketStats for twapPrice / lastPrice
-      const statsFn = pallet.marketStats;
-      if (statsFn) {
-        const raw = await statsFn(entityId);
-        if (raw && !(raw as { isNone?: boolean }).isNone) {
+      // 1. Try TWAP accumulator (global)
+      const twapFn = pallet.twapAccumulatorStore;
+      if (twapFn) {
+        try {
+          const raw = await twapFn();
           const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
-          if (unwrapped) {
-            const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-            const twap = BigInt(String(obj.twapPrice ?? obj.twap_price ?? 0));
+          const obj = (unwrapped as any)?.toJSON?.() ?? unwrapped;
+          if (obj && typeof obj === 'object') {
+            const currentCumulative = BigInt(String(obj.currentCumulative ?? obj.current_cumulative ?? 0));
+            const currentBlock = BigInt(String(obj.currentBlock ?? obj.current_block ?? 0));
+            const twap = currentBlock > BigInt(0) ? currentCumulative / currentBlock : BigInt(0);
             if (twap > BigInt(0)) {
               return { nexPerUsdt: twap, rateSource: 'twap' as const };
             }
@@ -47,18 +49,19 @@ export function useNexUsdtPrice(entityId: number): NexUsdtPriceResult {
               return { nexPerUsdt: last, rateSource: 'lastPrice' as const };
             }
           }
+        } catch {
+          // ignore
         }
       }
 
-      // 2. Fallback to initialPrice
-      const initFn = pallet.initialPrice ?? pallet.initPrice ?? pallet.basePrice
-        ?? pallet.initialPrices ?? pallet.nexPrice ?? pallet.price;
-      if (initFn) {
+      // 2. Fallback to lastTradePrice / depositExchangeRate (global)
+      const ltpFn = pallet.lastTradePrice ?? pallet.depositExchangeRate;
+      if (ltpFn) {
         let raw: unknown;
         try {
-          raw = await initFn(entityId);
+          raw = await ltpFn();
         } catch {
-          try { raw = await initFn(); } catch { return null; }
+          return null;
         }
         if (raw && !(raw as { isNone?: boolean }).isNone) {
           const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
@@ -66,7 +69,7 @@ export function useNexUsdtPrice(entityId: number): NexUsdtPriceResult {
             const val = (unwrapped as any).toJSON?.() ?? unwrapped;
             const num = BigInt(String(val ?? 0));
             if (num > BigInt(0)) {
-              return { nexPerUsdt: num, rateSource: 'initialPrice' as const };
+              return { nexPerUsdt: num, rateSource: 'lastTradePrice' as const };
             }
           }
         }

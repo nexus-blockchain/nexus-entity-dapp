@@ -5,7 +5,7 @@ import type { EntityContext, EntityData } from '@/lib/types/models';
 import { EntityStatus, EntityType, GovernanceMode } from '@/lib/types/enums';
 import { useEntityQuery } from '@/hooks/use-entity-query';
 import { STALE_TIMES } from '@/lib/chain/constants';
-import { decodeChainString, entityTreasuryAddress } from '@/lib/utils/codec';
+import { decodeChainString, decodeOptionalChainString, entityTreasuryAddress } from '@/lib/utils/codec';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
 
@@ -20,10 +20,10 @@ function parseEntityData(raw: unknown): EntityData | null {
     id: Number(obj.id ?? 0),
     owner: String(obj.owner ?? ''),
     name: decodeChainString(obj.name),
-    logoCid: obj.logoCid ? decodeChainString(obj.logoCid) : null,
-    descriptionCid: obj.descriptionCid ? decodeChainString(obj.descriptionCid) : null,
-    metadataUri: obj.metadataUri ? decodeChainString(obj.metadataUri) : null,
-    contactCid: obj.contactCid ? decodeChainString(obj.contactCid) : null,
+    logoCid: decodeOptionalChainString(obj.logoCid),
+    descriptionCid: decodeOptionalChainString(obj.descriptionCid),
+    metadataUri: decodeOptionalChainString(obj.metadataUri),
+    contactCid: decodeOptionalChainString(obj.contactCid),
     status: String(obj.status ?? 'Active') as EntityStatus,
     entityType: String(obj.entityType ?? 'Merchant') as EntityType,
     governanceMode: String(obj.governanceMode ?? 'None') as GovernanceMode,
@@ -76,6 +76,7 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
   );
 
   // Query current user's admin permissions
+  // Chain no longer has separate entityAdmins storage; admins are embedded in the Entity struct
   const {
     data: permissions,
     isLoading: permissionsLoading,
@@ -83,8 +84,21 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
     ['entity', entityId, 'permissions', walletAddress],
     async (api) => {
       if (!walletAddress) return 0;
-      const raw = await api.query.entityRegistry.entityAdmins(entityId, walletAddress);
-      return parsePermissions(raw);
+      const pallet = (api.query as any).entityRegistry;
+      // Derive from entities struct: admins field is Vec<(AccountId32, u32)>
+      const entityRaw = await pallet.entities(entityId);
+      const ent = entityRaw?.unwrapOr?.(null) ?? entityRaw;
+      if (!ent) return 0;
+      const obj = ent.toJSON?.() ?? ent;
+      const admins = obj?.admins ?? [];
+      if (Array.isArray(admins)) {
+        for (const entry of admins) {
+          const addr = Array.isArray(entry) ? String(entry[0]) : String(entry?.account ?? entry?.[0] ?? '');
+          const bits = Array.isArray(entry) ? Number(entry[1]) : Number(entry?.permission ?? entry?.[1] ?? 0);
+          if (addr === walletAddress) return bits;
+        }
+      }
+      return 0;
     },
     {
       staleTime: STALE_TIMES.entity,

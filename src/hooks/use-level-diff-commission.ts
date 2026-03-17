@@ -50,7 +50,7 @@ export function useLevelDiffCommission() {
     ['entity', entityId, 'levelDiff'],
     async (api) => {
       if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].levelDiffConfigs;
+      const fn = (api.query as any)[PALLET].customLevelDiffConfigs;
       if (!fn) return null;
       const raw = await fn(entityId);
       return parseLevelDiffConfig(raw);
@@ -58,14 +58,11 @@ export function useLevelDiffCommission() {
     { staleTime: STALE_TIMES.members },
   );
 
+  // levelDiffStats not in chain; only CustomLevelDiffConfigs exists
   const statsQuery = useEntityQuery<LevelDiffStats | null>(
     ['entity', entityId, 'levelDiff', 'stats'],
-    async (api) => {
-      if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].levelDiffStats;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return parseLevelDiffStats(raw);
+    async () => {
+      return null;
     },
     { staleTime: STALE_TIMES.members },
   );

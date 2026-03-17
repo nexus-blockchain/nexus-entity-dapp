@@ -20,6 +20,7 @@ export { useDisclosure } from './use-disclosure';
 export { useKyc } from './use-kyc';
 export { useTokensale, computeDutchAuctionPrice } from './use-tokensale';
 export { useReview, validateRating } from './use-review';
+export { useChainConstants, type ChainConstants, type NexMarketConstants } from './use-chain-constants';
 export {
   useEntityEvents,
   filterEntityEvent,

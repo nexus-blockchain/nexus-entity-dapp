@@ -39,13 +39,16 @@ export function NotificationCenter({
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+            <span
+              className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground"
+              data-testid="notification-badge"
+            >
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="end">
+      <PopoverContent className="w-80 p-0" align="end" data-testid="notification-panel">
         <div className="flex items-center justify-between px-4 py-3">
           <h3 className="text-sm font-semibold">{t('title')}</h3>
           {notifications.length > 0 && (
@@ -118,6 +121,7 @@ function NotificationItem({ notification, onMarkAsRead }: NotificationItemProps)
             className="h-6 w-6 shrink-0"
             onClick={() => onMarkAsRead(notification.id)}
             aria-label={t('markAsRead')}
+            data-testid={`notification-mark-read-${notification.id}`}
           >
             <Check className="h-3 w-3" />
           </Button>

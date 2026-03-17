@@ -5,18 +5,22 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useShops } from '@/hooks/use-shops';
+import { useEntityQuery, hasPallet } from '@/hooks/use-entity-query';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
+import type { ShopPointsConfig } from '@/lib/types/models';
 import { ShopType, EffectiveShopStatus } from '@/lib/types/enums';
+import { STALE_TIMES } from '@/lib/chain/constants';
+import { decodeChainString } from '@/lib/utils/codec';
 
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -88,20 +92,23 @@ function ShopDetailSkeleton() {
 function EnablePointsForm({ shopId }: { shopId: number }) {
   const { entityId } = useEntityContext();
   const t = useTranslations('shops');
+  const [pointsName, setPointsName] = useState('');
+  const [pointsSymbol, setPointsSymbol] = useState('');
   const [rewardRateBps, setRewardRateBps] = useState('100');
   const [exchangeRateBps, setExchangeRateBps] = useState('100');
   const [transferable, setTransferable] = useState(false);
 
-  const enablePoints = useEntityMutation('entityShop', 'enablePoints', {
+  const enablePoints = useEntityMutation('entityLoyalty', 'enablePoints', {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      enablePoints.mutate([shopId, Number(rewardRateBps), Number(exchangeRateBps), transferable]);
+      if (!pointsName.trim() || !pointsSymbol.trim()) return;
+      enablePoints.mutate([shopId, pointsName.trim(), pointsSymbol.trim(), Number(rewardRateBps), Number(exchangeRateBps), transferable]);
     },
-    [shopId, rewardRateBps, exchangeRateBps, transferable, enablePoints],
+    [shopId, pointsName, pointsSymbol, rewardRateBps, exchangeRateBps, transferable, enablePoints],
   );
 
   return (
@@ -110,9 +117,9 @@ function EnablePointsForm({ shopId }: { shopId: number }) {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="reward-rate" className="text-xs text-muted-foreground">
+          <LabelWithTip htmlFor="reward-rate" className="text-xs text-muted-foreground" tip={t('help.rewardRate')}>
             {t('detail.rewardRate')}
-          </Label>
+          </LabelWithTip>
           <Input
             id="reward-rate"
             type="number"
@@ -123,9 +130,9 @@ function EnablePointsForm({ shopId }: { shopId: number }) {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="exchange-rate" className="text-xs text-muted-foreground">
+          <LabelWithTip htmlFor="exchange-rate" className="text-xs text-muted-foreground" tip={t('help.exchangeRate')}>
             {t('detail.exchangeRate')}
-          </Label>
+          </LabelWithTip>
           <Input
             id="exchange-rate"
             type="number"
@@ -143,7 +150,7 @@ function EnablePointsForm({ shopId }: { shopId: number }) {
           checked={transferable}
           onCheckedChange={setTransferable}
         />
-        <Label htmlFor="transferable" className="text-sm">{t('detail.allowTransfer')}</Label>
+        <LabelWithTip htmlFor="transferable" className="text-sm" tip={t('help.allowTransfer')}>{t('detail.allowTransfer')}</LabelWithTip>
       </div>
 
       <div className="flex items-center gap-3">
@@ -171,11 +178,11 @@ function UpdatePointsForm({ shopId, currentConfig }: {
   const [exchangeRateBps, setExchangeRateBps] = useState(String(currentConfig.exchangeRateBps));
   const [transferable, setTransferable] = useState(currentConfig.transferable);
 
-  const updatePointsConfig = useEntityMutation('entityShop', 'updatePointsConfig', {
+  const updatePointsConfig = useEntityMutation('entityLoyalty', 'updatePointsConfig', {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
-  const disablePoints = useEntityMutation('entityShop', 'disablePoints', {
+  const disablePoints = useEntityMutation('entityLoyalty', 'disablePoints', {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
@@ -206,9 +213,9 @@ function UpdatePointsForm({ shopId, currentConfig }: {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="update-reward-rate" className="text-xs text-muted-foreground">
+            <LabelWithTip htmlFor="update-reward-rate" className="text-xs text-muted-foreground" tip={t('help.rewardRate')}>
               {t('detail.rewardRate')}
-            </Label>
+            </LabelWithTip>
             <Input
               id="update-reward-rate"
               type="number"
@@ -219,9 +226,9 @@ function UpdatePointsForm({ shopId, currentConfig }: {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="update-exchange-rate" className="text-xs text-muted-foreground">
+            <LabelWithTip htmlFor="update-exchange-rate" className="text-xs text-muted-foreground" tip={t('help.exchangeRate')}>
               {t('detail.exchangeRate')}
-            </Label>
+            </LabelWithTip>
             <Input
               id="update-exchange-rate"
               type="number"
@@ -239,7 +246,7 @@ function UpdatePointsForm({ shopId, currentConfig }: {
             checked={transferable}
             onCheckedChange={setTransferable}
           />
-          <Label htmlFor="update-transferable" className="text-sm">{t('detail.allowTransfer')}</Label>
+          <LabelWithTip htmlFor="update-transferable" className="text-sm" tip={t('help.allowTransfer')}>{t('detail.allowTransfer')}</LabelWithTip>
         </div>
 
         <div className="flex items-center gap-3">
@@ -286,6 +293,30 @@ export function ShopDetailPage() {
   const { getShop, isLoading, error } = useShops();
 
   const shop = getShop(shopId);
+
+  // Query points config separately from entityLoyalty pallet
+  const pointsConfigQuery = useEntityQuery<ShopPointsConfig | null>(
+    ['entity', entityId, 'shop', shopId, 'pointsConfig'],
+    async (api) => {
+      if (!hasPallet(api, 'entityLoyalty')) return null;
+      const fn = (api.query as any).entityLoyalty.shopPointsConfigs;
+      if (!fn) return null;
+      const raw = await fn(shopId);
+      if (!raw || (raw as any).isNone) return null;
+      const obj = (raw as any).unwrapOr?.(null) ?? raw;
+      if (!obj) return null;
+      const data = (obj as any).toJSON?.() ?? obj;
+      return {
+        name: decodeChainString(data.name),
+        symbol: decodeChainString(data.symbol),
+        rewardRateBps: Number(data.rewardRateBps ?? data.reward_rate_bps ?? data.rewardRate ?? data.reward_rate ?? 0),
+        exchangeRateBps: Number(data.exchangeRateBps ?? data.exchange_rate_bps ?? data.exchangeRate ?? data.exchange_rate ?? 0),
+        transferable: Boolean(data.transferable),
+      } as ShopPointsConfig;
+    },
+    { staleTime: STALE_TIMES.token, enabled: !!shop },
+  );
+  const pointsConfig = pointsConfigQuery.data ?? null;
 
   if (isLoading) {
     return <ShopDetailSkeleton />;
@@ -359,8 +390,8 @@ export function ShopDetailPage() {
               <CardTitle className="text-lg">{t('detail.pointsSystem')}</CardTitle>
             </CardHeader>
             <CardContent>
-              {shop.pointsConfig ? (
-                <UpdatePointsForm shopId={shop.id} currentConfig={shop.pointsConfig} />
+              {pointsConfig ? (
+                <UpdatePointsForm shopId={shop.id} currentConfig={pointsConfig} />
               ) : (
                 <EnablePointsForm shopId={shop.id} />
               )}

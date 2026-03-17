@@ -1,354 +1,264 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { useEntityContext } from '@/app/[entityId]/entity-provider';
-import { useEntityQuery } from '@/hooks/use-entity-query';
-import { useEntityMutation } from '@/hooks/use-entity-mutation';
-import { PermissionGuard } from '@/components/permission-guard';
-import { TxConfirmDialog } from '@/components/tx-confirm-dialog';
-import { TxStatusIndicator } from '@/components/tx-status-indicator';
-import { AdminPermission } from '@/lib/types/models';
-import { useWalletStore } from '@/stores/wallet-store';
-import { STALE_TIMES } from '@/lib/chain/constants';
-
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-
-import { cn } from '@/lib/utils/cn';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { useEntityContext } from '@/app/[entityId]/entity-provider';
+import { hasPallet, useEntityQuery } from '@/hooks/use-entity-query';
+import { useEntityMutation } from '@/hooks/use-entity-mutation';
+import { useEntityToken } from '@/hooks/use-entity-token';
+import { PermissionGuard } from '@/components/permission-guard';
+import { TxStatusIndicator } from '@/components/tx-status-indicator';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Separator } from '@/components/ui/separator';
-import { Skeleton } from '@/components/ui/skeleton';
+import { LabelWithTip } from '@/components/field-help-tip';
+import { Textarea } from '@/components/ui/textarea';
+import { AdminPermission } from '@/lib/types/models';
+import { STALE_TIMES } from '@/lib/chain/constants';
+import { formatNex } from '@/lib/utils/format';
 
-// ─── Types ──────────────────────────────────────────────────
+function parsePendingDividendAmount(raw: unknown): bigint {
+  if (!raw || (raw as { isNone?: boolean }).isNone) return BigInt(0);
+  const value = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
+  if (value == null) return BigInt(0);
+  const plain = (value as { toJSON?: () => unknown }).toJSON?.() ?? value;
 
-interface DividendConfig {
-  dividendId: number;
-  totalAmount: bigint;
-  snapshotBlock: number;
-  distributed: boolean;
+  if (typeof plain === 'object' && plain !== null) {
+    const obj = plain as Record<string, unknown>;
+    return BigInt(String(obj.pendingAmount ?? obj.pending_amount ?? obj.totalAmount ?? obj.total_amount ?? 0));
+  }
+
+  return BigInt(String(plain ?? 0));
 }
 
-interface ClaimStatus {
-  claimed: boolean;
-  amount: bigint;
+function isTxBusy(mutation: { txState: { status: string } }): boolean {
+  return mutation.txState.status === 'signing' || mutation.txState.status === 'broadcasting';
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-function formatAmount(amount: bigint): string {
-  return amount.toLocaleString();
+function parseRecipients(input: string): Array<[string, string]> {
+  return input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [account, amount] = line.split(',').map((item) => item.trim());
+      return [account, amount] as [string, string];
+    })
+    .filter(([account, amount]) => !!account && !!amount);
 }
 
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
-
-function parseDividendConfigs(raw: unknown): DividendConfig[] {
-  if (!raw) return [];
-  const arr = Array.isArray(raw) ? raw : (raw as any).toArray?.() ?? [];
-  return arr.map((item: any, idx: number) => {
-    const obj = item.toJSON?.() ?? item;
-    return {
-      dividendId: Number(obj.dividendId ?? obj.dividend_id ?? idx),
-      totalAmount: BigInt(String(obj.totalAmount ?? obj.total_amount ?? 0)),
-      snapshotBlock: Number(obj.snapshotBlock ?? obj.snapshot_block ?? 0),
-      distributed: Boolean(obj.distributed),
-    };
-  });
-}
-
-function parseClaimStatus(raw: unknown): ClaimStatus | null {
-  if (!raw || (raw as any).isNone) return null;
-  const unwrapped = (raw as any).unwrapOr?.(null) ?? raw;
-  if (!unwrapped) return null;
-  const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  return {
-    claimed: Boolean(obj.claimed),
-    amount: BigInt(String(obj.amount ?? 0)),
-  };
-}
-
-// ─── Skeleton Loading ───────────────────────────────────────
-
-function DividendPageSkeleton() {
-  return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      <Skeleton className="h-8 w-48" />
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-32" />
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-9 w-24" />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-40" />
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ─── Configure Dividend ─────────────────────────────────────
-
-function ConfigureDividendSection() {
+function DividendConfigSection() {
   const { entityId, isReadOnly, isSuspended } = useEntityContext();
-  const [totalAmount, setTotalAmount] = useState('');
-  const [snapshotBlock, setSnapshotBlock] = useState('');
+  const { tokenConfig } = useEntityToken();
+  const t = useTranslations('token');
+  const [enabled, setEnabled] = useState(true);
+  const [minPeriod, setMinPeriod] = useState('0');
+
+  useEffect(() => {
+    setEnabled(tokenConfig?.dividendConfig?.enabled ?? true);
+    setMinPeriod(String(tokenConfig?.dividendConfig?.minPeriod ?? 0));
+  }, [tokenConfig?.dividendConfig?.enabled, tokenConfig?.dividendConfig?.minPeriod]);
 
   const configureDividend = useEntityMutation('entityToken', 'configureDividend', {
-    invalidateKeys: [['entity', entityId, 'token', 'dividend']],
+    invalidateKeys: [['entity', entityId, 'token']],
   });
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!totalAmount.trim() || !snapshotBlock.trim()) return;
-      configureDividend.mutate([entityId, totalAmount.trim(), snapshotBlock.trim()]);
-      setTotalAmount('');
-      setSnapshotBlock('');
-    },
-    [entityId, totalAmount, snapshotBlock, configureDividend],
-  );
-
-  if (isReadOnly || isSuspended) return null;
+  const handleSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    configureDividend.mutate([entityId, enabled, minPeriod.trim() || '0']);
+  }, [configureDividend, enabled, entityId, minPeriod]);
 
   return (
-    <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">配置分红</CardTitle>
-          <CardDescription>创建新的分红配置，指定总额和快照区块</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="dividend-amount">分红总额</Label>
-              <Input
-                id="dividend-amount"
-                type="text"
-                inputMode="decimal"
-                value={totalAmount}
-                onChange={(e) => setTotalAmount(e.target.value)}
-                placeholder="分红总额"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="snapshot-block">快照区块高度</Label>
-              <Input
-                id="snapshot-block"
-                type="text"
-                inputMode="numeric"
-                value={snapshotBlock}
-                onChange={(e) => setSnapshotBlock(e.target.value)}
-                placeholder="快照区块高度"
-                required
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                type="submit"
-                disabled={isTxBusy(configureDividend)}
-              >
-                创建分红
-              </Button>
-              <TxStatusIndicator txState={configureDividend.txState} />
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </PermissionGuard>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('dividend.configureDividend')}</CardTitle>
+        <CardDescription>链端签名：configureDividend(entityId, enabled, minPeriod)</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">当前状态</p>
+            <p className="mt-1 text-sm font-medium">
+              {tokenConfig?.dividendConfig?.enabled ? '已启用' : '已停用'}
+            </p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">最小周期</p>
+            <p className="mt-1 text-sm font-medium">
+              {tokenConfig?.dividendConfig?.minPeriod ?? 0}
+            </p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">说明</p>
+            <p className="mt-1 text-sm font-medium">分红配置已改为直接读取 token config</p>
+          </div>
+        </div>
+
+        {!isReadOnly && !isSuspended && (
+          <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center gap-3 rounded-md border p-3">
+                <input
+                  id="dividend-enabled"
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                <Label htmlFor="dividend-enabled">启用分红</Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dividend-min-period">最小周期（区块）</Label>
+                <Input
+                  id="dividend-min-period"
+                  type="text"
+                  inputMode="numeric"
+                  value={minPeriod}
+                  onChange={(e) => setMinPeriod(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button type="submit" disabled={isTxBusy(configureDividend)}>保存配置</Button>
+                <TxStatusIndicator txState={configureDividend.txState} />
+              </div>
+            </form>
+          </PermissionGuard>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
-// ─── Dividend List with Distribute & Claim ──────────────────
-
-function DividendList({ dividends }: { dividends: DividendConfig[] }) {
+function PendingDividendSection({ pendingAmount }: { pendingAmount: bigint }) {
   const { entityId, isReadOnly, isSuspended } = useEntityContext();
-  const address = useWalletStore((s) => s.address);
+  const t = useTranslations('token');
+  const [totalAmount, setTotalAmount] = useState('');
+  const [recipients, setRecipients] = useState('');
 
   const distributeDividend = useEntityMutation('entityToken', 'distributeDividend', {
     invalidateKeys: [['entity', entityId, 'token', 'dividend']],
   });
 
+  const parsedRecipients = useMemo(() => parseRecipients(recipients), [recipients]);
+
+  const handleDistribute = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    if (!totalAmount.trim()) return;
+    distributeDividend.mutate([entityId, totalAmount.trim(), parsedRecipients]);
+  }, [distributeDividend, entityId, parsedRecipients, totalAmount]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">待分配分红</CardTitle>
+        <CardDescription>链端签名：distributeDividend(entityId, totalAmount, recipients)</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-md border p-4">
+          <p className="text-xs text-muted-foreground">当前待分配金额</p>
+          <p className="mt-1 text-lg font-semibold">{formatNex(pendingAmount)} NEX</p>
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          当前页面不再依赖旧的 dividendConfigs / dividendClaims storage；只保留真实配置、待分配金额和分发动作。
+        </p>
+
+        {!isReadOnly && !isSuspended && (
+          <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
+            <form onSubmit={handleDistribute} className="space-y-4">
+              <div className="space-y-2">
+                <LabelWithTip htmlFor="dividend-total-amount" tip={t('help.totalAmount')}>{t('dividend.totalAmount')}</LabelWithTip>
+                <Input
+                  id="dividend-total-amount"
+                  type="text"
+                  inputMode="decimal"
+                  value={totalAmount}
+                  onChange={(e) => setTotalAmount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dividend-recipients">接收人列表</Label>
+                <Textarea
+                  id="dividend-recipients"
+                  value={recipients}
+                  onChange={(e) => setRecipients(e.target.value)}
+                  placeholder={'地址1,金额1\n地址2,金额2'}
+                  rows={6}
+                />
+                <p className="text-xs text-muted-foreground">
+                  每行一个接收人，格式为：账户地址,金额
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button type="submit" disabled={isTxBusy(distributeDividend) || !totalAmount.trim()}>
+                  {t('dividend.distribute')}
+                </Button>
+                <TxStatusIndicator txState={distributeDividend.txState} />
+              </div>
+            </form>
+          </PermissionGuard>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClaimSection() {
+  const { entityId } = useEntityContext();
   const claimDividend = useEntityMutation('entityToken', 'claimDividend', {
     invalidateKeys: [['entity', entityId, 'token', 'dividend']],
   });
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [showDistributeConfirm, setShowDistributeConfirm] = useState(false);
-
-  // Query claim status for selected dividend
-  const claimStatusQuery = useEntityQuery<ClaimStatus | null>(
-    ['entity', entityId, 'token', 'dividend', 'claim', selectedId, address],
-    async (api) => {
-      if (selectedId === null || !address) return null;
-      const raw = await (api.query as any).entityToken.dividendClaims(entityId, selectedId, address);
-      return parseClaimStatus(raw);
-    },
-    {
-      staleTime: STALE_TIMES.token,
-      enabled: selectedId !== null && !!address,
-    },
-  );
-
-  const handleDistribute = useCallback(
-    (dividendId: number) => {
-      setSelectedId(dividendId);
-      setShowDistributeConfirm(true);
-    },
-    [],
-  );
-
-  const handleDistributeConfirm = useCallback(() => {
-    if (selectedId === null) return;
-    distributeDividend.mutate([entityId, selectedId]);
-    setShowDistributeConfirm(false);
-  }, [entityId, selectedId, distributeDividend]);
-
-  const handleClaim = useCallback(
-    (dividendId: number) => {
-      claimDividend.mutate([entityId, dividendId]);
-    },
-    [entityId, claimDividend],
-  );
-
-  if (dividends.length === 0) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="flex items-center justify-center p-6">
-          <p className="text-sm text-muted-foreground">暂无分红记录</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">
-            分红列表
-            <Badge variant="secondary" className="ml-2">{dividends.length}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>总额</TableHead>
-                <TableHead>快照区块</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {dividends.map((d) => (
-                <TableRow key={d.dividendId}>
-                  <TableCell>{d.dividendId}</TableCell>
-                  <TableCell>{formatAmount(d.totalAmount)}</TableCell>
-                  <TableCell className="text-muted-foreground">{d.snapshotBlock}</TableCell>
-                  <TableCell>
-                    <Badge variant={d.distributed ? 'success' : 'warning'}>
-                      {d.distributed ? '已分发' : '待分发'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {!d.distributed && !isReadOnly && !isSuspended && (
-                        <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
-                          <Button
-                            size="sm"
-                            onClick={() => handleDistribute(d.dividendId)}
-                            disabled={isTxBusy(distributeDividend)}
-                          >
-                            分发
-                          </Button>
-                        </PermissionGuard>
-                      )}
-                      {d.distributed && address && (
-                        <Button
-                          size="sm"
-                          variant={claimStatusQuery.data?.claimed ? 'secondary' : 'default'}
-                          className={cn(!claimStatusQuery.data?.claimed && 'bg-green-600 hover:bg-green-700')}
-                          onClick={() => {
-                            setSelectedId(d.dividendId);
-                            handleClaim(d.dividendId);
-                          }}
-                          disabled={isTxBusy(claimDividend) || claimStatusQuery.data?.claimed === true}
-                        >
-                          {claimStatusQuery.data?.claimed ? '已领取' : '领取'}
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-        <CardFooter className="gap-3">
-          <TxStatusIndicator txState={distributeDividend.txState} />
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">成员领取</CardTitle>
+        <CardDescription>链端签名：claimDividend(entityId)</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          当前页面不再依赖旧的 claim 状态 storage；成员直接发起 claim，由链端判断是否存在可领取分红。
+        </p>
+        <div className="flex items-center gap-3">
+          <Button onClick={() => claimDividend.mutate([entityId])} disabled={isTxBusy(claimDividend)}>
+            领取分红
+          </Button>
           <TxStatusIndicator txState={claimDividend.txState} />
-        </CardFooter>
-      </Card>
-
-      <TxConfirmDialog
-        open={showDistributeConfirm}
-        onClose={() => setShowDistributeConfirm(false)}
-        onConfirm={handleDistributeConfirm}
-        config={{
-          title: '确认分发分红',
-          description: '分发后将按快照区块的持仓比例向所有持有人分配分红，此操作不可撤销。',
-          severity: 'warning',
-        }}
-      />
-    </>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
-
-// ─── Page ───────────────────────────────────────────────────
 
 export function DividendPage() {
   const t = useTranslations('token');
   const { entityId } = useEntityContext();
+  const { tokenConfig } = useEntityToken();
 
-  const dividendsQuery = useEntityQuery<DividendConfig[]>(
-    ['entity', entityId, 'token', 'dividend'],
+  const pendingAmountQuery = useEntityQuery<bigint>(
+    ['entity', entityId, 'token', 'dividend', 'pendingAmount'],
     async (api) => {
-      const raw = await (api.query as any).entityToken.dividendConfigs(entityId);
-      return parseDividendConfigs(raw);
+      if (!hasPallet(api, 'entityToken')) return BigInt(0);
+      const fn = (api.query as any).entityToken.totalPendingDividends;
+      if (!fn) return BigInt(0);
+      return parsePendingDividendAmount(await fn(entityId));
     },
     { staleTime: STALE_TIMES.token },
   );
 
-  if (dividendsQuery.isLoading) {
-    return <DividendPageSkeleton />;
-  }
-
-  if (dividendsQuery.error) {
+  if (!tokenConfig) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <Card className="border-destructive/50">
-          <CardContent className="p-6 text-sm text-destructive">
-            加载失败: {String(dividendsQuery.error)}
+      <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
+        <h1 className="text-2xl font-bold tracking-tight">{t('dividend.title')}</h1>
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            请先创建实体代币后再配置分红。
           </CardContent>
         </Card>
       </div>
@@ -358,8 +268,9 @@ export function DividendPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
       <h1 className="text-2xl font-bold tracking-tight">{t('dividend.title')}</h1>
-      <ConfigureDividendSection />
-      <DividendList dividends={dividendsQuery.data ?? []} />
+      <DividendConfigSection />
+      <PendingDividendSection pendingAmount={pendingAmountQuery.data ?? BigInt(0)} />
+      <ClaimSection />
     </div>
   );
 }

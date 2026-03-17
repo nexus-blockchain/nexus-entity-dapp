@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useMembers } from '@/hooks/use-members';
@@ -9,20 +9,198 @@ import { useHasPermission } from '@/components/permission-guard';
 import { useWalletStore } from '@/stores';
 import { AdminPermission } from '@/lib/types/models';
 import type { MemberData } from '@/lib/types/models';
+import { MemberStatus } from '@/lib/types/enums';
+import { formatNex, formatToken } from '@/lib/utils/format';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CopyableAddress } from '@/components/copyable-address';
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-6)}` : addr;
+const STATUS_BADGE_VARIANT: Record<MemberStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'; className?: string }> = {
+  [MemberStatus.Active]: { variant: 'success' },
+  [MemberStatus.Pending]: { variant: 'warning' },
+  [MemberStatus.Frozen]: { variant: 'secondary', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
+  [MemberStatus.Banned]: { variant: 'destructive' },
+  [MemberStatus.Expired]: { variant: 'outline' },
+};
+
+// ─── Member Detail Dialog ──────────────────────────────────
+
+function MemberDetailContent({
+  account,
+  member,
+  onViewReferrals,
+}: {
+  account: string;
+  member: MemberData | undefined;
+  onViewReferrals: (account: string) => void;
+}) {
+  const t = useTranslations('members.referrals');
+  const te = useTranslations('enums');
+  const { useReferralTree } = useMembers();
+  const { useMemberCommission } = useCommission();
+  const { data: refData } = useReferralTree(account);
+  const { data: commData } = useMemberCommission(account);
+
+  return (
+    <div className="space-y-4">
+      {/* Address */}
+      <div className="rounded-md bg-muted p-3">
+        <p className="break-all font-mono text-sm">{account}</p>
+      </div>
+
+      {member ? (
+        <>
+          {/* Status & Level */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground">{t('status')}</p>
+              <Badge
+                variant={STATUS_BADGE_VARIANT[member.status].variant}
+                className={STATUS_BADGE_VARIANT[member.status].className}
+              >
+                {te(`memberStatus.${member.status}`)}
+              </Badge>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t('level')}</p>
+              <p className="text-lg font-semibold">Lv.{member.level}</p>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Spending & Orders */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground">{t('totalSpent')}</p>
+              <p className="font-medium">{formatNex(member.totalSpent)} NEX</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t('joinedAt')}</p>
+              <p className="font-medium">#{member.joinedAt}</p>
+            </div>
+          </div>
+
+          {/* Referrer */}
+          <div>
+            <p className="text-xs text-muted-foreground">{t('referrerLabel')}</p>
+            <p className="font-mono text-sm">
+              {member.referrer ? <CopyableAddress address={member.referrer} textClassName="text-xs" /> : t('noReferrer')}
+            </p>
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t('noReferrals')}</p>
+      )}
+
+      <Separator />
+
+      {/* Referral stats */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground">{t('directCount')}</p>
+          <p className="font-medium">{refData?.directReferrals.length ?? '-'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">{t('teamSizeLabel')}</p>
+          <p className="font-medium">{refData?.teamSize ?? '-'}</p>
+        </div>
+      </div>
+
+      {/* Commission */}
+      {commData && (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground">{t('nexCommission')}</p>
+            <p className="font-medium">{formatNex(commData.nexEarned)} NEX</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">{t('tokenCommission')}</p>
+            <p className="font-medium">{formatToken(commData.tokenEarned)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Action: View this member's referral network */}
+      <Button
+        variant="outline"
+        className="w-full"
+        onClick={() => onViewReferrals(account)}
+      >
+        {t('viewReferrals')}
+      </Button>
+    </div>
+  );
+}
+
+function MemberDetailDialog({
+  account,
+  member,
+  open,
+  onOpenChange,
+  onViewReferrals,
+}: {
+  account: string | null;
+  member: MemberData | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onViewReferrals: (account: string) => void;
+}) {
+  const t = useTranslations('members.referrals');
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('memberDetail')}</DialogTitle>
+        </DialogHeader>
+        {account && (
+          <MemberDetailContent
+            account={account}
+            member={member}
+            onViewReferrals={(a) => {
+              onOpenChange(false);
+              onViewReferrals(a);
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Clickable Address ─────────────────────────────────────
+
+function ClickableAddress({
+  account,
+  onClick,
+  className,
+}: {
+  account: string;
+  onClick: (account: string) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(account)}
+      className={`cursor-pointer font-mono text-sm underline decoration-dotted underline-offset-4 hover:text-primary ${className ?? ''}`}
+      title={account}
+    >
+      {account}
+    </button>
+  );
 }
 
 // ─── Search Input (admin-only) ──────────────────────────────
@@ -110,10 +288,12 @@ function ReferralSubTree({
   account,
   memberMap,
   depth,
+  onClickAccount,
 }: {
   account: string;
   memberMap: Map<string, MemberData>;
   depth: number;
+  onClickAccount: (account: string) => void;
 }) {
   const t = useTranslations('members.referrals');
   const [expanded, setExpanded] = useState(false);
@@ -129,7 +309,7 @@ function ReferralSubTree({
             {expanded ? '▾' : '▸'}
           </Button>
         </CollapsibleTrigger>
-        <span className="font-mono text-sm">{shortAddr(account)}</span>
+        <ClickableAddress account={account} onClick={onClickAccount} />
         {member && (
           <Badge variant="outline" className="text-xs">
             Lv.{member.level}
@@ -160,10 +340,11 @@ function ReferralSubTree({
                   account={ref}
                   memberMap={memberMap}
                   depth={depth + 1}
+                  onClickAccount={onClickAccount}
                 />
               ) : (
                 <div key={ref} className="flex items-center gap-2 px-2 py-1.5">
-                  <span className="font-mono text-sm">{shortAddr(ref)}</span>
+                  <ClickableAddress account={ref} onClick={onClickAccount} />
                   {memberMap.get(ref) && (
                     <Badge variant="outline" className="text-xs">
                       Lv.{memberMap.get(ref)!.level}
@@ -183,9 +364,11 @@ function ReferralSubTree({
 function ReferralTreeSection({
   directReferrals,
   memberMap,
+  onClickAccount,
 }: {
   directReferrals: string[];
   memberMap: Map<string, MemberData>;
+  onClickAccount: (account: string) => void;
 }) {
   const t = useTranslations('members.referrals');
 
@@ -218,7 +401,7 @@ function ReferralTreeSection({
                 const member = memberMap.get(ref);
                 return (
                   <div key={ref} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50">
-                    <span className="font-mono text-sm">{shortAddr(ref)}</span>
+                    <ClickableAddress account={ref} onClick={onClickAccount} />
                     {member && (
                       <Badge variant="outline" className="text-xs">
                         Lv.{member.level}
@@ -238,6 +421,7 @@ function ReferralTreeSection({
                   account={ref}
                   memberMap={memberMap}
                   depth={1}
+                  onClickAccount={onClickAccount}
                 />
               ))}
             </div>
@@ -251,6 +435,7 @@ function ReferralTreeSection({
                   account={ref}
                   memberMap={memberMap}
                   depth={0}
+                  onClickAccount={onClickAccount}
                 />
               ))}
             </div>
@@ -266,9 +451,11 @@ function ReferralTreeSection({
 function DirectReferralRow({
   account,
   memberMap,
+  onClickAccount,
 }: {
   account: string;
   memberMap: Map<string, MemberData>;
+  onClickAccount: (account: string) => void;
 }) {
   const { useReferralTree } = useMembers();
   const { useMemberCommission } = useCommission();
@@ -278,11 +465,13 @@ function DirectReferralRow({
 
   return (
     <TableRow>
-      <TableCell className="font-mono text-sm">{shortAddr(account)}</TableCell>
+      <TableCell>
+        <ClickableAddress account={account} onClick={onClickAccount} />
+      </TableCell>
       <TableCell>{member ? `Lv.${member.level}` : '-'}</TableCell>
       <TableCell className="text-right">{refData?.teamSize ?? '-'}</TableCell>
-      <TableCell className="text-right">{member ? member.totalSpent.toString() : '-'}</TableCell>
-      <TableCell className="text-right">{commData ? commData.nexEarned.toString() : '-'}</TableCell>
+      <TableCell className="text-right">{member ? `${formatNex(member.totalSpent)}` : '-'}</TableCell>
+      <TableCell className="text-right">{commData ? `${formatNex(commData.nexEarned)}` : '-'}</TableCell>
     </TableRow>
   );
 }
@@ -292,9 +481,11 @@ function DirectReferralRow({
 function DirectReferralTable({
   directReferrals,
   memberMap,
+  onClickAccount,
 }: {
   directReferrals: string[];
   memberMap: Map<string, MemberData>;
+  onClickAccount: (account: string) => void;
 }) {
   const t = useTranslations('members.referrals');
 
@@ -318,7 +509,7 @@ function DirectReferralTable({
           </TableHeader>
           <TableBody>
             {directReferrals.map((ref) => (
-              <DirectReferralRow key={ref} account={ref} memberMap={memberMap} />
+              <DirectReferralRow key={ref} account={ref} memberMap={memberMap} onClickAccount={onClickAccount} />
             ))}
           </TableBody>
         </Table>
@@ -368,6 +559,7 @@ export function ReferralsPage() {
   const isAdmin = useHasPermission(AdminPermission.MEMBER_MANAGE);
 
   const [targetAccount, setTargetAccount] = useState<string | null>(null);
+  const [detailAccount, setDetailAccount] = useState<string | null>(null);
   const activeAccount = targetAccount ?? walletAddress;
 
   const { members, isLoading: membersLoading, useReferralTree } = useMembers();
@@ -385,6 +577,14 @@ export function ReferralsPage() {
   const teamSize = referralData?.teamSize ?? 0;
   const directCount = directReferrals.length;
   const indirectCount = teamSize > directCount ? teamSize - directCount : 0;
+
+  const handleClickAccount = useCallback((account: string) => {
+    setDetailAccount(account);
+  }, []);
+
+  const handleViewReferrals = useCallback((account: string) => {
+    setTargetAccount(account);
+  }, []);
 
   if (membersLoading || (activeAccount && referralLoading)) {
     return <ReferralsSkeleton />;
@@ -409,7 +609,7 @@ export function ReferralsPage() {
         <h1 className="text-2xl font-bold tracking-tight">{t('title')}</h1>
         {activeAccount && (
           <Badge variant="secondary" className="font-mono text-xs">
-            {shortAddr(activeAccount)}
+            <CopyableAddress address={activeAccount} textClassName="text-xs" hideCopyIcon />
           </Badge>
         )}
       </div>
@@ -427,11 +627,21 @@ export function ReferralsPage() {
       <ReferralTreeSection
         directReferrals={directReferrals}
         memberMap={memberMap}
+        onClickAccount={handleClickAccount}
       />
 
       <DirectReferralTable
         directReferrals={directReferrals}
         memberMap={memberMap}
+        onClickAccount={handleClickAccount}
+      />
+
+      <MemberDetailDialog
+        account={detailAccount}
+        member={detailAccount ? memberMap.get(detailAccount) : undefined}
+        open={detailAccount !== null}
+        onOpenChange={(open) => { if (!open) setDetailAccount(null); }}
+        onViewReferrals={handleViewReferrals}
       />
     </div>
   );

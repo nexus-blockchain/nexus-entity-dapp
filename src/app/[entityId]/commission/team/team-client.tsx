@@ -8,13 +8,14 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { SalesThresholdMode } from '@/lib/types/enums';
 import { useTeamCommission } from '@/hooks/use-team-commission';
-import { useWalletStore } from '@/stores/wallet-store';
 
 import { useTranslations } from 'next-intl';
+import { formatNex } from '@/lib/utils/format';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -58,7 +59,7 @@ function TeamSkeleton() {
 function ConfigSection() {
   const t = useTranslations('team');
   const { entityId } = useEntityContext();
-  const { config, setTeamPerformanceConfig, pauseTeamPerformance, resumeTeamPerformance } = useTeamCommission();
+  const { config, setTeamPerformanceConfig, clearTeamPerformanceConfig, pauseTeamPerformance, resumeTeamPerformance } = useTeamCommission();
 
   const [maxDepth, setMaxDepth] = useState('');
   const [allowStacking, setAllowStacking] = useState(false);
@@ -159,7 +160,7 @@ function ConfigSection() {
           <form onSubmit={handleSaveConfig} className="space-y-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="tm-max-depth">{t('maxDepth')}</Label>
+                <LabelWithTip htmlFor="tm-max-depth" tip={t('help.maxDepth')}>{t('maxDepth')}</LabelWithTip>
                 <Input
                   id="tm-max-depth"
                   type="number"
@@ -170,7 +171,7 @@ function ConfigSection() {
                 <p className="text-xs text-muted-foreground">{t('maxDepthDesc')}</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="tm-threshold-mode">{t('thresholdMode')}</Label>
+                <LabelWithTip htmlFor="tm-threshold-mode" tip={t('help.thresholdMode')}>{t('thresholdMode')}</LabelWithTip>
                 <Select value={thresholdMode} onValueChange={(v) => setThresholdMode(v as SalesThresholdMode)}>
                   <SelectTrigger id="tm-threshold-mode">
                     <SelectValue />
@@ -197,7 +198,16 @@ function ConfigSection() {
               <Button type="submit" disabled={isTxBusy(setTeamPerformanceConfig)}>
                 {t('saveConfig')}
               </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => clearTeamPerformanceConfig.mutate([entityId])}
+                disabled={isTxBusy(clearTeamPerformanceConfig)}
+              >
+                {t('clearConfig')}
+              </Button>
               <TxStatusIndicator txState={setTeamPerformanceConfig.txState} />
+              <TxStatusIndicator txState={clearTeamPerformanceConfig.txState} />
             </div>
           </form>
         </PermissionGuard>
@@ -267,7 +277,7 @@ function TiersSection() {
                 <TableRow key={index}>
                   <TableCell className="font-medium">T{tier.tier}</TableCell>
                   <TableCell>{tier.rate} {t('bps')}</TableCell>
-                  <TableCell>{tier.minTeamPerformance.toString()}</TableCell>
+                  <TableCell>{formatNex(tier.minTeamPerformance)} NEX</TableCell>
                   <TableCell>{tier.minDirectCount}</TableCell>
                   <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
                     <TableCell>
@@ -292,7 +302,7 @@ function TiersSection() {
           <Separator className="my-4" />
           <form onSubmit={handleAddTier} className="flex items-end gap-3 flex-wrap">
             <div className="space-y-2">
-              <Label htmlFor="tm-new-rate">{t('newTierRate')}</Label>
+              <LabelWithTip htmlFor="tm-new-rate" tip={t('help.newTierRate')}>{t('newTierRate')}</LabelWithTip>
               <Input
                 id="tm-new-rate"
                 type="number"
@@ -302,7 +312,7 @@ function TiersSection() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tm-new-perf">{t('newTierMinPerformance')}</Label>
+              <LabelWithTip htmlFor="tm-new-perf" tip={t('help.newTierMinPerformance')}>{t('newTierMinPerformance')}</LabelWithTip>
               <Input
                 id="tm-new-perf"
                 type="text"
@@ -313,7 +323,7 @@ function TiersSection() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tm-new-direct">{t('newTierMinDirect')}</Label>
+              <LabelWithTip htmlFor="tm-new-direct" tip={t('help.newTierMinDirect')}>{t('newTierMinDirect')}</LabelWithTip>
               <Input
                 id="tm-new-direct"
                 type="number"
@@ -336,97 +346,15 @@ function TiersSection() {
   );
 }
 
-// ─── Stats Section ──────────────────────────────────────────
-
-function StatsSection() {
+function RuntimeNoticeSection() {
   const t = useTranslations('team');
-  const { stats } = useTeamCommission();
 
   return (
-    <Card>
+    <Card className="border-dashed">
       <CardHeader>
         <CardTitle className="text-lg">{t('statsSection')}</CardTitle>
-        <CardDescription>{t('statsSectionDesc')}</CardDescription>
+        <CardDescription>{t('runtimeDerivedOnly')}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalDistributed')}</p>
-              <p className="text-lg font-semibold">{stats?.totalDistributed?.toString() ?? '0'}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalTeams')}</p>
-              <p className="text-lg font-semibold">{stats?.totalTeams ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('activeTeamLeaders')}</p>
-              <p className="text-lg font-semibold">{stats?.activeTeamLeaders ?? 0}</p>
-            </CardContent>
-          </Card>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─── My Team Info ───────────────────────────────────────────
-
-function MyTeamSection() {
-  const t = useTranslations('team');
-  const address = useWalletStore((s) => s.address);
-  const { useTeamInfo } = useTeamCommission();
-  const { data: info } = useTeamInfo(address);
-
-  if (!address) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">{t('myTeam')}</CardTitle>
-          <CardDescription>{t('connectWalletFirst')}</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('myTeam')}</CardTitle>
-        <CardDescription>{t('myTeamDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('teamSize')}</p>
-              <p className="text-lg font-semibold">{info?.teamSize ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('teamPerformance')}</p>
-              <p className="text-lg font-semibold">{info?.teamPerformance?.toString() ?? '0'}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('currentTier')}</p>
-              <p className="text-lg font-semibold">T{info?.currentTier ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('directCount')}</p>
-              <p className="text-lg font-semibold">{info?.directCount ?? 0}</p>
-            </CardContent>
-          </Card>
-        </div>
-      </CardContent>
     </Card>
   );
 }
@@ -465,8 +393,7 @@ export function TeamPage() {
 
       <ConfigSection />
       <TiersSection />
-      <StatsSection />
-      <MyTeamSection />
+      <RuntimeNoticeSection />
     </div>
   );
 }

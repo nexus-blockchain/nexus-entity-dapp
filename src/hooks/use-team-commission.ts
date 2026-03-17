@@ -85,7 +85,7 @@ export function useTeamCommission() {
     ['entity', entityId, 'team'],
     async (api) => {
       if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].teamConfigs;
+      const fn = (api.query as any)[PALLET].teamPerformanceConfigs;
       if (!fn) return null;
       const raw = await fn(entityId);
       return parseTeamConfig(raw);
@@ -93,30 +93,23 @@ export function useTeamCommission() {
     { staleTime: STALE_TIMES.members },
   );
 
+  // teamStats not in chain; only TeamPerformanceConfigs and TeamPerformanceEnabled exist
   const statsQuery = useEntityQuery<TeamStats | null>(
     ['entity', entityId, 'team', 'stats'],
-    async (api) => {
-      if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].teamStats;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return parseTeamStats(raw);
+    async () => {
+      return null;
     },
     { staleTime: STALE_TIMES.members },
   );
 
-  const useTeamInfo = (account: string | null) =>
+  // teamInfos not in chain
+  const useTeamInfo = (_account: string | null) =>
     useEntityQuery<TeamInfo | null>(
-      ['entity', entityId, 'team', 'info', account],
-      async (api) => {
-        if (!hasPallet(api, PALLET)) return null;
-        if (!account) return null;
-        const fn = (api.query as any)[PALLET].teamInfos;
-        if (!fn) return null;
-        const raw = await fn(entityId, account);
-        return parseTeamInfo(raw);
+      ['entity', entityId, 'team', 'info', _account],
+      async () => {
+        return null;
       },
-      { staleTime: STALE_TIMES.members, enabled: !!account },
+      { staleTime: STALE_TIMES.members, enabled: !!_account },
     );
 
   // ─── Mutations ──────────────────────────────────────────

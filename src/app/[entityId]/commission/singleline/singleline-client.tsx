@@ -1,23 +1,27 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useSingleLineCommission } from '@/hooks/use-single-line-commission';
-import { useWalletStore } from '@/stores/wallet-store';
+import { useMembers } from '@/hooks/use-members';
 
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { AlertCircle, ArrowUp } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -55,7 +59,7 @@ function SingleLineSkeleton() {
 function ConfigSection() {
   const t = useTranslations('singleLine');
   const { entityId } = useEntityContext();
-  const { config, configureSingleLine, pauseSingleLine, resumeSingleLine } = useSingleLineCommission();
+  const { config, configureSingleLine, clearConfig, pauseSingleLine, resumeSingleLine } = useSingleLineCommission();
 
   const [uplineRate, setUplineRate] = useState('');
   const [downlineRate, setDownlineRate] = useState('');
@@ -65,13 +69,26 @@ function ConfigSection() {
   const [maxUplineLevels, setMaxUplineLevels] = useState('');
   const [maxDownlineLevels, setMaxDownlineLevels] = useState('');
 
+  const [levelMode, setLevelMode] = useState<'memberLevel' | 'threshold'>('memberLevel');
+  const [modeInitialized, setModeInitialized] = useState(false);
+
+  // Sync levelMode from config on initial load
+  useEffect(() => {
+    if (config && !modeInitialized) {
+      setLevelMode(config.levelIncrementThreshold > 0n ? 'threshold' : 'memberLevel');
+      setModeInitialized(true);
+    }
+  }, [config, modeInitialized]);
+
   const buildParams = () => [
     entityId,
     Number(uplineRate) || config?.uplineRate || 100,
     Number(downlineRate) || config?.downlineRate || 100,
     Number(baseUplineLevels) || config?.baseUplineLevels || 3,
     Number(baseDownlineLevels) || config?.baseDownlineLevels || 3,
-    BigInt(levelIncrementThreshold || String(config?.levelIncrementThreshold ?? 0)),
+    levelMode === 'memberLevel'
+      ? 0n
+      : BigInt(levelIncrementThreshold || String(config?.levelIncrementThreshold ?? 0)),
     Number(maxUplineLevels) || config?.maxUplineLevels || 10,
     Number(maxDownlineLevels) || config?.maxDownlineLevels || 10,
   ];
@@ -81,7 +98,7 @@ function ConfigSection() {
       e.preventDefault();
       configureSingleLine.mutate(buildParams());
     },
-    [entityId, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, config, configureSingleLine],
+    [entityId, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, config, configureSingleLine],
   );
 
   const handleToggle = useCallback(() => {
@@ -92,7 +109,7 @@ function ConfigSection() {
     } else {
       configureSingleLine.mutate(buildParams());
     }
-  }, [entityId, config, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, pauseSingleLine, resumeSingleLine, configureSingleLine]);
+  }, [entityId, config, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, pauseSingleLine, resumeSingleLine, configureSingleLine]);
 
   const isToggleBusy = isTxBusy(pauseSingleLine) || isTxBusy(resumeSingleLine) || isTxBusy(configureSingleLine);
   const toggleTxState = config?.enabled
@@ -105,7 +122,7 @@ function ConfigSection() {
   const statusLabel = config?.enabled ? t('enabled') : config ? t('paused') : t('notEnabled');
 
   return (
-    <Card>
+    <Card id="sl-config-section">
       <CardHeader>
         <CardTitle className="text-lg">{t('configSection')}</CardTitle>
         <CardDescription>{t('configSectionDesc')}</CardDescription>
@@ -156,33 +173,60 @@ function ConfigSection() {
           <form onSubmit={handleSaveConfig} className="space-y-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div className="space-y-2">
-                <Label htmlFor="sl-upline-rate">{t('uplineRate')}</Label>
+                <LabelWithTip htmlFor="sl-upline-rate" tip={t('help.uplineRate')}>{t('uplineRate')}</LabelWithTip>
                 <Input id="sl-upline-rate" type="number" value={uplineRate} onChange={(e) => setUplineRate(e.target.value)} placeholder={String(config?.uplineRate ?? 100)} />
                 <p className="text-xs text-muted-foreground">{t('bps')}</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sl-downline-rate">{t('downlineRate')}</Label>
+                <LabelWithTip htmlFor="sl-downline-rate" tip={t('help.downlineRate')}>{t('downlineRate')}</LabelWithTip>
                 <Input id="sl-downline-rate" type="number" value={downlineRate} onChange={(e) => setDownlineRate(e.target.value)} placeholder={String(config?.downlineRate ?? 100)} />
                 <p className="text-xs text-muted-foreground">{t('bps')}</p>
               </div>
+            </div>
+
+            <Separator className="my-4" />
+
+            {/* Level determination mode tabs */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{t('levelModeSection')}</p>
+                <p className="text-xs text-muted-foreground">{t('levelModeDesc')}</p>
+              </div>
+              <Tabs value={levelMode} onValueChange={(v) => setLevelMode(v as 'memberLevel' | 'threshold')}>
+                <TabsList>
+                  <TabsTrigger value="memberLevel">{t('modeMemberLevel')}</TabsTrigger>
+                  <TabsTrigger value="threshold">{t('modeThreshold')}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <p className="text-xs text-muted-foreground">
+                {levelMode === 'memberLevel' ? t('modeMemberLevelDesc') : t('modeThresholdDesc')}
+              </p>
+
+              {levelMode === 'threshold' && (
+                <div className="space-y-2 max-w-xs">
+                  <LabelWithTip htmlFor="sl-threshold" tip={t('help.levelIncrementThreshold')}>{t('levelIncrementThreshold')}</LabelWithTip>
+                  <Input id="sl-threshold" type="number" value={levelIncrementThreshold} onChange={(e) => setLevelIncrementThreshold(e.target.value)} placeholder={String(config?.levelIncrementThreshold ?? 0)} />
+                </div>
+              )}
+            </div>
+
+            <Separator className="my-4" />
+
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div className="space-y-2">
-                <Label htmlFor="sl-base-up">{t('baseUplineLevels')}</Label>
+                <LabelWithTip htmlFor="sl-base-up" tip={t('help.baseUplineLevels')}>{t('baseUplineLevels')}</LabelWithTip>
                 <Input id="sl-base-up" type="number" value={baseUplineLevels} onChange={(e) => setBaseUplineLevels(e.target.value)} placeholder={String(config?.baseUplineLevels ?? 3)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sl-base-down">{t('baseDownlineLevels')}</Label>
+                <LabelWithTip htmlFor="sl-base-down" tip={t('help.baseDownlineLevels')}>{t('baseDownlineLevels')}</LabelWithTip>
                 <Input id="sl-base-down" type="number" value={baseDownlineLevels} onChange={(e) => setBaseDownlineLevels(e.target.value)} placeholder={String(config?.baseDownlineLevels ?? 3)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sl-threshold">{t('levelIncrementThreshold')}</Label>
-                <Input id="sl-threshold" type="number" value={levelIncrementThreshold} onChange={(e) => setLevelIncrementThreshold(e.target.value)} placeholder={String(config?.levelIncrementThreshold ?? 0)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="sl-max-up">{t('maxUplineLevels')}</Label>
+                <LabelWithTip htmlFor="sl-max-up" tip={t('help.maxUplineLevels')}>{t('maxUplineLevels')}</LabelWithTip>
                 <Input id="sl-max-up" type="number" value={maxUplineLevels} onChange={(e) => setMaxUplineLevels(e.target.value)} placeholder={String(config?.maxUplineLevels ?? 10)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sl-max-down">{t('maxDownlineLevels')}</Label>
+                <LabelWithTip htmlFor="sl-max-down" tip={t('help.maxDownlineLevels')}>{t('maxDownlineLevels')}</LabelWithTip>
                 <Input id="sl-max-down" type="number" value={maxDownlineLevels} onChange={(e) => setMaxDownlineLevels(e.target.value)} placeholder={String(config?.maxDownlineLevels ?? 10)} />
               </div>
             </div>
@@ -190,7 +234,16 @@ function ConfigSection() {
               <Button type="submit" disabled={isTxBusy(configureSingleLine)}>
                 {t('saveConfig')}
               </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => clearConfig.mutate([entityId])}
+                disabled={isTxBusy(clearConfig)}
+              >
+                {t('clearConfig')}
+              </Button>
               <TxStatusIndicator txState={configureSingleLine.txState} />
+              <TxStatusIndicator txState={clearConfig.txState} />
             </div>
           </form>
         </PermissionGuard>
@@ -199,93 +252,242 @@ function ConfigSection() {
   );
 }
 
-// ─── Stats Section ──────────────────────────────────────────
+// ─── Level Overrides Section ─────────────────────────────────
 
-function StatsSection() {
+function LevelOverridesSection() {
   const t = useTranslations('singleLine');
-  const { stats } = useSingleLineCommission();
+  const { entityId } = useEntityContext();
+  const { config, useLevelOverrides, setLevelBasedLevels, removeLevelBasedLevels } = useSingleLineCommission();
+  const { customLevels } = useMembers();
+
+  const maxLevelId = config?.maxUplineLevels ? 10 : 10; // query up to 10 levels
+  const { data: overrides } = useLevelOverrides(maxLevelId);
+
+  const [newLevelId, setNewLevelId] = useState('');
+  const [newUplineLevels, setNewUplineLevels] = useState('');
+  const [newDownlineLevels, setNewDownlineLevels] = useState('');
+  const [validationError, setValidationError] = useState('');
+
+  // Detect LevelOverrideExceedsMax from chain tx error
+  const isChainExceedsMaxError = setLevelBasedLevels.txState.status === 'error'
+    && setLevelBasedLevels.txState.error?.includes('LevelOverrideExceedsMax');
+
+  // Build a map from level ID to level name for display
+  const levelNameById = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const level of customLevels) {
+      map[level.id] = level.name;
+    }
+    return map;
+  }, [customLevels]);
+
+  // Filter out levels that already have an override configured
+  const availableLevels = useMemo(() => {
+    const configuredIds = new Set(overrides?.map((o) => o.levelId) ?? []);
+    return customLevels.filter((level) => !configuredIds.has(level.id));
+  }, [customLevels, overrides]);
+
+  const handleSetOverride = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setValidationError('');
+      const levelId = Number(newLevelId);
+      const upLevels = Number(newUplineLevels);
+      const downLevels = Number(newDownlineLevels);
+      if (levelId <= 0 || (upLevels <= 0 && downLevels <= 0)) return;
+      if (config) {
+        if (upLevels > config.maxUplineLevels) {
+          setValidationError(t('exceedsMaxGuide.validationUp', { value: upLevels, max: config.maxUplineLevels }));
+          return;
+        }
+        if (downLevels > config.maxDownlineLevels) {
+          setValidationError(t('exceedsMaxGuide.validationDown', { value: downLevels, max: config.maxDownlineLevels }));
+          return;
+        }
+      }
+      setLevelBasedLevels.mutate([entityId, levelId, upLevels, downLevels]);
+      setNewLevelId('');
+      setNewUplineLevels('');
+      setNewDownlineLevels('');
+    },
+    [entityId, newLevelId, newUplineLevels, newDownlineLevels, config, setLevelBasedLevels, t],
+  );
+
+  const handleRemove = useCallback(
+    (levelId: number) => {
+      removeLevelBasedLevels.mutate([entityId, levelId]);
+    },
+    [entityId, removeLevelBasedLevels],
+  );
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">{t('statsSection')}</CardTitle>
-        <CardDescription>{t('statsSectionDesc')}</CardDescription>
+        <CardTitle className="text-lg">{t('levelOverridesSection')}</CardTitle>
+        <CardDescription>{t('levelOverridesSectionDesc')}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalDistributed')}</p>
-              <p className="text-lg font-semibold">{stats?.totalDistributed?.toString() ?? '0'}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalLines')}</p>
-              <p className="text-lg font-semibold">{stats?.totalLines ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('avgLineDepth')}</p>
-              <p className="text-lg font-semibold">{stats?.avgLineDepth ?? 0}</p>
-            </CardContent>
-          </Card>
-        </div>
+      <CardContent className="space-y-4">
+        {/* LevelOverrideExceedsMax guidance alert */}
+        {(validationError || isChainExceedsMaxError) && (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-destructive">
+                  {t('exceedsMaxGuide.title')}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {validationError || t('exceedsMaxGuide.desc')}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-md bg-muted/50 p-3 space-y-2 text-sm">
+              <p className="font-medium">{t('exceedsMaxGuide.currentLimits')}</p>
+              <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                <span>{t('maxUplineLevels')}: <strong className="text-foreground">{config?.maxUplineLevels ?? 0}</strong></span>
+                <span>{t('maxDownlineLevels')}: <strong className="text-foreground">{config?.maxDownlineLevels ?? 0}</strong></span>
+              </div>
+            </div>
+            <div className="text-sm space-y-1.5">
+              <p className="font-medium">{t('exceedsMaxGuide.stepsTitle')}</p>
+              <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                <li>{t('exceedsMaxGuide.step1')}</li>
+                <li>{t('exceedsMaxGuide.step2')}</li>
+                <li>{t('exceedsMaxGuide.step3')}</li>
+              </ol>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => document.getElementById('sl-config-section')?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+              {t('exceedsMaxGuide.goToConfig')}
+            </Button>
+          </div>
+        )}
+
+        {/* Current overrides list */}
+        {(!overrides || overrides.length === 0) ? (
+          <p className="text-sm text-muted-foreground">{t('noOverrides')}</p>
+        ) : (
+          <div className="space-y-2">
+            {overrides.map((o) => (
+              <div key={o.levelId} className="flex items-center gap-4 rounded-md border p-3">
+                <div className="flex-1 grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">{t('levelId')}</p>
+                    <p className="text-sm font-medium">
+                      Lv.{o.levelId} {levelNameById[o.levelId] ?? ''}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">{t('overrideUplineLevels')}</p>
+                    <p className="text-sm font-medium">{o.uplineLevels}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">{t('overrideDownlineLevels')}</p>
+                    <p className="text-sm font-medium">{o.downlineLevels}</p>
+                  </div>
+                </div>
+                <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleRemove(o.levelId)}
+                    disabled={isTxBusy(removeLevelBasedLevels)}
+                  >
+                    {t('removeOverride')}
+                  </Button>
+                </PermissionGuard>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add new override form */}
+        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+          <Separator className="my-4" />
+          <form onSubmit={handleSetOverride} className="space-y-3">
+            <p className="text-sm font-medium">{t('addLevelOverride')}</p>
+            {customLevels.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('noLevelsConfigured')}</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <LabelWithTip htmlFor="lo-level-id" tip={t('help.levelId')}>{t('levelId')}</LabelWithTip>
+                    <Select value={newLevelId} onValueChange={setNewLevelId}>
+                      <SelectTrigger id="lo-level-id">
+                        <SelectValue placeholder={t('selectLevel')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableLevels.map((level) => (
+                          <SelectItem key={level.id} value={String(level.id)}>
+                            Lv.{level.id} {level.name}
+                          </SelectItem>
+                        ))}
+                        {availableLevels.length === 0 && (
+                          <SelectItem value="_none" disabled>
+                            {t('allLevelsConfigured')}
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <LabelWithTip htmlFor="lo-up-levels" tip={t('help.overrideUplineLevels')}>{t('overrideUplineLevels')}</LabelWithTip>
+                    <Input
+                      id="lo-up-levels"
+                      type="number"
+                      min={1}
+                      max={config?.maxUplineLevels ?? 10}
+                      value={newUplineLevels}
+                      onChange={(e) => { setNewUplineLevels(e.target.value); setValidationError(''); }}
+                      placeholder={String(config?.maxUplineLevels ?? 5)}
+                    />
+                    <p className="text-xs text-muted-foreground">{t('maxValue')}: {config?.maxUplineLevels ?? 10}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <LabelWithTip htmlFor="lo-down-levels" tip={t('help.overrideDownlineLevels')}>{t('overrideDownlineLevels')}</LabelWithTip>
+                    <Input
+                      id="lo-down-levels"
+                      type="number"
+                      min={1}
+                      max={config?.maxDownlineLevels ?? 10}
+                      value={newDownlineLevels}
+                      onChange={(e) => { setNewDownlineLevels(e.target.value); setValidationError(''); }}
+                      placeholder={String(config?.maxDownlineLevels ?? 3)}
+                    />
+                    <p className="text-xs text-muted-foreground">{t('maxValue')}: {config?.maxDownlineLevels ?? 10}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button type="submit" disabled={isTxBusy(setLevelBasedLevels) || !newLevelId || availableLevels.length === 0}>
+                    {t('setOverride')}
+                  </Button>
+                  <TxStatusIndicator txState={setLevelBasedLevels.txState} />
+                  <TxStatusIndicator txState={removeLevelBasedLevels.txState} />
+                </div>
+              </>
+            )}
+          </form>
+        </PermissionGuard>
       </CardContent>
     </Card>
   );
 }
 
-// ─── My Position ────────────────────────────────────────────
-
-function MyPositionSection() {
+function RuntimeNoticeSection() {
   const t = useTranslations('singleLine');
-  const address = useWalletStore((s) => s.address);
-  const { useLinePosition } = useSingleLineCommission();
-  const { data: position } = useLinePosition(address);
-
-  if (!address) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">{t('myPosition')}</CardTitle>
-          <CardDescription>{t('connectWalletFirst')}</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
 
   return (
-    <Card>
+    <Card className="border-dashed">
       <CardHeader>
-        <CardTitle className="text-lg">{t('myPosition')}</CardTitle>
-        <CardDescription>{t('myPositionDesc')}</CardDescription>
+        <CardTitle className="text-lg">{t('statsSection')}</CardTitle>
+        <CardDescription>{t('runtimeDerivedOnly')}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('position')}</p>
-              <p className="text-lg font-semibold">{position?.position ?? 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('upline')}</p>
-              <p className="truncate font-mono text-sm font-medium">
-                {position?.upline ?? t('noUpline')}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="shadow-none">
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('downlineCount')}</p>
-              <p className="text-lg font-semibold">{position?.downlineCount ?? 0}</p>
-            </CardContent>
-          </Card>
-        </div>
-      </CardContent>
     </Card>
   );
 }
@@ -296,7 +498,9 @@ export function SingleLinePage() {
   const t = useTranslations('singleLine');
   const tc = useTranslations('common');
   const { entityId } = useEntityContext();
-  const { isLoading, error } = useSingleLineCommission();
+  const { isLoading, error, config } = useSingleLineCommission();
+
+  const levelMode = config && config.levelIncrementThreshold > 0n ? 'threshold' : 'memberLevel';
 
   if (isLoading) return <SingleLineSkeleton />;
 
@@ -323,8 +527,8 @@ export function SingleLinePage() {
       </div>
 
       <ConfigSection />
-      <StatsSection />
-      <MyPositionSection />
+      {levelMode === 'memberLevel' && <LevelOverridesSection />}
+      <RuntimeNoticeSection />
     </div>
   );
 }

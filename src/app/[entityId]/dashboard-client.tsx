@@ -10,7 +10,7 @@ import { useEntityMarket } from '@/hooks/use-entity-market';
 import { useGovernance } from '@/hooks/use-governance';
 import { useCommission } from '@/hooks/use-commission';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
-import { isFundWarning } from '@/lib/utils/fund-warning';
+import { isFundWarning, FUND_WARNING_THRESHOLD } from '@/lib/utils/fund-warning';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -25,21 +25,8 @@ import {
   ArrowRight, Package, Activity, Scale, FileText, Star,
   Zap, Eye, CircleDollarSign, Gavel,
 } from 'lucide-react';
-
-const FUND_WARNING_THRESHOLD = BigInt('10000000000000');
-
-function formatNexBalance(balance: bigint): string {
-  const divisor = BigInt('1000000000000');
-  const whole = balance / divisor;
-  const remainder = balance % divisor;
-  const decStr = remainder.toString().padStart(12, '0').slice(0, 4);
-  const trimmed = decStr.replace(/0+$/, '');
-  return trimmed ? `${whole.toLocaleString()}.${trimmed}` : whole.toLocaleString();
-}
-
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-6)}` : addr;
-}
+import { CopyableAddress } from '@/components/copyable-address';
+import { formatNex } from '@/lib/utils/format';
 
 const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'> = {
   Active: 'success',
@@ -146,15 +133,15 @@ function MarketSummaryCard({ entityId }: { entityId: number }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">{t('twapPrice')}</p>
-                <p className="text-sm font-semibold">{formatNexBalance(stats.twapPrice)}</p>
+                <p className="text-sm font-semibold">{formatNex(stats.twapPrice)}</p>
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">{t('lastPrice')}</p>
-                <p className="text-sm font-semibold">{formatNexBalance(stats.lastPrice)}</p>
+                <p className="text-sm font-semibold">{formatNex(stats.lastPrice)}</p>
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">{t('volume24h')}</p>
-                <p className="text-sm font-semibold">{formatNexBalance(stats.volume24h)}</p>
+                <p className="text-sm font-semibold">{formatNex(stats.volume24h)}</p>
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">{t('circuitBreakerStatus')}</p>
@@ -399,7 +386,7 @@ function ShopOverviewCard({ entityId }: { entityId: number }) {
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">{t('totalOperatingFund')}</p>
-                <p className="text-sm font-semibold">{formatNexBalance(stats.totalFund)} NEX</p>
+                <p className="text-sm font-semibold">{formatNex(stats.totalFund)} NEX</p>
               </div>
               {stats.lowFund > 0 && (
                 <div className="space-y-0.5">
@@ -480,7 +467,7 @@ function TokenSummaryCard({ entityId }: { entityId: number }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('totalSupply')}</p>
-            <p className="text-sm font-semibold">{formatNexBalance(tokenConfig.totalSupply)}</p>
+            <p className="text-sm font-semibold">{formatNex(tokenConfig.totalSupply)}</p>
           </div>
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('holderCount')}</p>
@@ -743,7 +730,7 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label={t('fundBalance')}
-          value={`${formatNexBalance(entity.fundBalance)} NEX`}
+          value={`${formatNex(entity.fundBalance)} NEX`}
           icon={<Wallet className="h-4 w-4" />}
           warning={fundWarning}
           warningText={t('lowBalance')}
@@ -771,7 +758,7 @@ export function DashboardPage() {
           value={tokenConfig ? tokenConfig.symbol : t('noToken')}
           icon={<Coins className="h-4 w-4" />}
           loading={tokenLoading}
-          subtext={tokenConfig ? t('holdersCount', { type: tokenConfig.tokenType, count: tokenConfig.holderCount }) : undefined}
+          subtext={tokenConfig ? t('holdersCount', { type: tokenConfig.tokenType }) : undefined}
           href={`/${entityId}/token`}
         />
       </div>

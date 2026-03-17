@@ -12,6 +12,7 @@ const ESCROW_STATUS_CONFIG: Record<EscrowStatus, { labelKey: string; variant: 'd
   Released: { labelKey: 'escrowStatus.Released', variant: 'success' },
   Refunded: { labelKey: 'escrowStatus.Refunded', variant: 'warning' },
   Disputed: { labelKey: 'escrowStatus.DisputeFrozen', variant: 'destructive' },
+  Closed: { labelKey: 'escrowStatus.Closed', variant: 'secondary' },
 };
 
 export function EscrowStatusSection({ escrowId }: { escrowId: number }) {

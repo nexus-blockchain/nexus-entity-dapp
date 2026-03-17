@@ -14,7 +14,9 @@ import { useNexBalance } from '@/hooks/use-external-queries';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityToken } from '@/hooks/use-entity-token';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
+import { CopyableAddress } from '@/components/copyable-address';
 import { isTauri } from '@/lib/utils/platform';
+import { isValidSubstrateAddress } from '@/lib/utils/address';
 import { DesktopWalletDialog } from '@/components/wallet/desktop-wallet-dialog';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
@@ -61,19 +63,19 @@ export interface ModuleConfig {
 }
 
 export const MODULE_CONFIGS: ModuleConfig[] = [
-  { key: 'dashboard', label: '', href: '', icon: LayoutDashboard },
-  { key: 'settings', label: '', href: '/settings', icon: Settings, permission: AdminPermission.ENTITY_MANAGE },
-  { key: 'shop', label: '', href: '/shops', icon: Store },
-  { key: 'order', label: '', href: '/orders', icon: Package },
-  { key: 'token', label: '', href: '/token', icon: Coins },
-  { key: 'market', label: '', href: '/market', icon: TrendingUp },
-  { key: 'member', label: '', href: '/members', icon: Users },
-  { key: 'commission', label: '', href: '/commission', icon: CircleDollarSign, permission: AdminPermission.COMMISSION_MANAGE },
-  { key: 'governance', label: '', href: '/governance', icon: Vote },
-  { key: 'disclosure', label: '', href: '/disclosure', icon: FileText },
-  { key: 'kyc', label: '', href: '/kyc', icon: ShieldCheck },
-  { key: 'tokensale', label: '', href: '/tokensale', icon: Rocket },
-  { key: 'review', label: '', href: '/reviews', icon: Star },
+  { key: 'dashboard', label: 'dashboard', href: '', icon: LayoutDashboard },
+  { key: 'settings', label: 'settings', href: '/settings', icon: Settings, permission: AdminPermission.ENTITY_MANAGE },
+  { key: 'shop', label: 'shops', href: '/shops', icon: Store },
+  { key: 'order', label: 'orders', href: '/orders', icon: Package },
+  { key: 'token', label: 'token', href: '/token', icon: Coins },
+  { key: 'market', label: 'market', href: '/market', icon: TrendingUp },
+  { key: 'member', label: 'members', href: '/members', icon: Users },
+  { key: 'commission', label: 'commission', href: '/commission', icon: CircleDollarSign, permission: AdminPermission.COMMISSION_MANAGE },
+  { key: 'governance', label: 'governance', href: '/governance', icon: Vote },
+  { key: 'disclosure', label: 'disclosure', href: '/disclosure', icon: FileText },
+  { key: 'kyc', label: 'kyc', href: '/kyc', icon: ShieldCheck },
+  { key: 'tokensale', label: 'tokensale', href: '/tokensale', icon: Rocket },
+  { key: 'review', label: 'reviews', href: '/reviews', icon: Star },
 ];
 
 const MOBILE_TAB_KEYS: ModuleKey[] = ['dashboard', 'shop', 'order', 'member', 'token'];
@@ -92,6 +94,10 @@ const MODULE_NAV_KEY: Record<string, string> = {
   tokensale: 'tokensale', review: 'reviews',
 };
 
+function bigPow10(n: number): bigint {
+  return BigInt('1' + '0'.repeat(n));
+}
+
 function formatNexBalance(balance: bigint): string {
   const divisor = BigInt('1000000000000');
   const whole = balance / divisor;
@@ -101,9 +107,33 @@ function formatNexBalance(balance: bigint): string {
   return trimmed ? `${whole}.${trimmed}` : whole.toString();
 }
 
-function shortenAddress(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+/**
+ * Format a raw token balance with decimals (e.g. 1000000000000 with 12 decimals → "1").
+ */
+function formatTokenBalance(balance: bigint, decimals: number): string {
+  if (decimals === 0) return balance.toString();
+  const divisor = bigPow10(decimals);
+  const whole = balance / divisor;
+  const remainder = balance % divisor;
+  if (remainder === BigInt(0)) return whole.toString();
+  const absRemainder = remainder < BigInt(0) ? -remainder : remainder;
+  const decStr = absRemainder.toString().padStart(decimals, '0');
+  const trimmed = decStr.replace(/0+$/, '');
+  return `${whole}.${trimmed}`;
+}
+
+/**
+ * Parse a decimal string to BigInt with given decimals, avoiding floating-point precision loss.
+ * E.g. parseUnits("0.1", 12) → 100000000000n
+ */
+function parseUnits(value: string, decimals: number): bigint {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '.') return BigInt(0);
+
+  const [intPart, fracPart = ''] = trimmed.split('.');
+  const paddedFrac = fracPart.slice(0, decimals).padEnd(decimals, '0');
+  const combined = (intPart || '0') + paddedFrac;
+  return BigInt(combined);
 }
 
 interface SidebarItemProps {
@@ -264,16 +294,23 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
   }, [connect, tw]);
 
   // Transfer
+  const [transferError, setTransferError] = useState('');
   const handleTransfer = useCallback(async () => {
     const to = transferTo.trim();
-    const amt = parseFloat(transferAmount);
-    if (!to || isNaN(amt) || amt <= 0) return;
+    if (!to || !transferAmount.trim()) return;
+    if (!isValidSubstrateAddress(to)) {
+      setTransferError('Invalid address');
+      return;
+    }
+    setTransferError('');
     if (transferTab === 'nex') {
-      const plancks = BigInt(Math.floor(amt * 1e12));
+      const plancks = parseUnits(transferAmount, 12);
+      if (plancks <= BigInt(0)) return;
       await nexTransfer.mutate([to, plancks]);
     } else {
       const decimals = tokenConfig?.decimals ?? 0;
-      const units = BigInt(Math.floor(amt * 10 ** decimals));
+      const units = parseUnits(transferAmount, decimals);
+      if (units <= BigInt(0)) return;
       await transferTokens.mutate([entityId, to, units]);
     }
     setTransferTo('');
@@ -306,8 +343,7 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" className="max-w-[220px]">
-            <p className="text-xs font-medium">{walletName ?? shortenAddress(address!)}</p>
-            <p className="text-[10px] text-muted-foreground font-mono break-all">{address}</p>
+            <p className="text-xs font-medium">{walletName ?? address!}</p>
             <p className="text-[10px] mt-0.5">{formatNexBalance(balance)} NEX</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">{copied ? tc('copied') : tc('clickToCopy')}</p>
           </TooltipContent>
@@ -348,7 +384,7 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
                     className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent transition-colors"
                   >
                     <span className="truncate font-medium">{acc.meta.name || tw('unnamed')}</span>
-                    <span className="ml-auto font-mono text-[10px] text-muted-foreground">{shortenAddress(acc.address)}</span>
+                    <span className="ml-auto font-mono text-[10px] text-muted-foreground break-all">{acc.address}</span>
                   </button>
                 ))}
               </div>
@@ -370,7 +406,7 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
         <div className="flex items-center gap-2">
           <Wallet className="h-3.5 w-3.5 text-primary shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium truncate">{walletName ?? shortenAddress(address!)}</p>
+            <p className="text-xs font-medium truncate">{walletName ?? address!}</p>
             <p className="text-[10px] text-muted-foreground">{formatNexBalance(balance)} NEX</p>
           </div>
           <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={disconnect}>
@@ -441,10 +477,11 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
           <Input
             placeholder={tw('recipientAddress')}
             value={transferTo}
-            onChange={(e) => setTransferTo(e.target.value)}
+            onChange={(e) => { setTransferTo(e.target.value); setTransferError(''); }}
             disabled={isTxBusy}
             className="h-7 text-xs font-mono"
           />
+          {transferError && <p className="text-[10px] text-destructive px-0.5">{transferError}</p>}
           <Input
             type="number"
             min="0"
@@ -460,7 +497,7 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
           <p className="text-[10px] text-muted-foreground px-0.5">
             {transferTab === 'nex'
               ? `${formatNexBalance(balance)} NEX`
-              : `${myTokenBalance.toString()} ${tokenConfig?.symbol ?? ''}`}
+              : `${formatTokenBalance(myTokenBalance, tokenConfig?.decimals ?? 0)} ${tokenConfig?.symbol ?? ''}`}
           </p>
 
           <Button

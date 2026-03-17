@@ -13,4 +13,15 @@ export { ipfsUrl } from './ipfs';
 export { validateAmount, type AssetType, type AmountValidationResult } from './amount';
 export { isFundWarning } from './fund-warning';
 export { getValidProductTransitions } from './product-status';
-export { getValidOrderTransitions, SELLER_ACTION_LABELS, BUYER_ACTION_LABELS } from './order-flow';
+export {
+  getValidOrderTransitions,
+  isServiceLikeCategory,
+  getDerivedOrderStage,
+  getSellerOrderActions,
+  getBuyerOrderActions,
+  SELLER_ACTION_LABELS,
+  BUYER_ACTION_LABELS,
+  type DerivedOrderStage,
+  type SellerOrderAction,
+  type BuyerOrderAction,
+} from './order-flow';

@@ -5,13 +5,16 @@ export interface GatewayProbeResult {
   latencyMs: number;
 }
 
+function getGatewayProbeUrl(gatewayUrl: string): string {
+  return gatewayUrl.endsWith('/') ? gatewayUrl : `${gatewayUrl}/`;
+}
+
 /**
- * Probe a single IPFS gateway by issuing a HEAD request to a known CID.
- * Returns latency on success, null on failure/timeout.
+ * Probe a single IPFS gateway by issuing a HEAD request to the gateway root.
+ * Any non-5xx HTTP response counts as reachable; network failures/timeouts do not.
  */
 export async function probeIpfsGateway(
   gatewayUrl: string,
-  probeCid: string = IPFS_HEALTH_CONFIG.probeCid,
   timeout: number = IPFS_HEALTH_CONFIG.probeTimeout,
 ): Promise<GatewayProbeResult | null> {
   const controller = new AbortController();
@@ -19,12 +22,13 @@ export async function probeIpfsGateway(
 
   try {
     const start = performance.now();
-    const res = await fetch(`${gatewayUrl}/${probeCid}`, {
+    const res = await fetch(getGatewayProbeUrl(gatewayUrl), {
       method: 'HEAD',
+      cache: 'no-store',
       signal: controller.signal,
     });
     const latencyMs = Math.round(performance.now() - start);
-    if (!res.ok) return null;
+    if (res.status >= 500) return null;
     return { gatewayUrl, latencyMs };
   } catch {
     return null;
@@ -38,11 +42,10 @@ export async function probeIpfsGateway(
  */
 export async function probeIpfsGatewaysBatch(
   gateways: string[],
-  probeCid: string = IPFS_HEALTH_CONFIG.probeCid,
   timeout: number = IPFS_HEALTH_CONFIG.probeTimeout,
 ): Promise<GatewayProbeResult[]> {
   const results = await Promise.all(
-    gateways.map((gw) => probeIpfsGateway(gw, probeCid, timeout)),
+    gateways.map((gw) => probeIpfsGateway(gw, timeout)),
   );
   return results.filter((r): r is GatewayProbeResult => r !== null);
 }

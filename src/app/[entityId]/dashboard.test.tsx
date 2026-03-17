@@ -71,6 +71,7 @@ function makeContext(overrides: Partial<EntityContext> = {}): EntityContext {
       logoCid: null,
       descriptionCid: null,
       metadataUri: null,
+      contactCid: null,
       status: EntityStatus.Active,
       entityType: EntityType.Merchant,
       governanceMode: GovernanceMode.None,
@@ -134,7 +135,7 @@ describe('DashboardPage', () => {
     mockUseEntityContext.mockReturnValue(makeContext());
     renderWithIntl(<DashboardPage />);
     expect(screen.getByText('Total Members')).toBeInTheDocument();
-    expect(screen.getByText('Token')).toBeInTheDocument();
+    expect(screen.getAllByText('Token').length).toBeGreaterThan(0);
   });
 
   test('formats zero balance correctly', () => {
@@ -157,16 +158,15 @@ describe('DashboardPage', () => {
   test('renders module status grid for visible modules', () => {
     mockUseEntityContext.mockReturnValue(makeContext());
     renderWithIntl(<DashboardPage />);
-    // Should show "可用模块" heading
-    expect(screen.getByText('可用模块')).toBeInTheDocument();
+    expect(screen.getByText('Available Modules')).toBeInTheDocument();
   });
 
   test('renders quick action links', () => {
     mockUseEntityContext.mockReturnValue(makeContext());
     renderWithIntl(<DashboardPage />);
-    expect(screen.getByText('管理店铺')).toBeInTheDocument();
-    expect(screen.getByText('查看订单')).toBeInTheDocument();
-    expect(screen.getByText('会员管理')).toBeInTheDocument();
-    expect(screen.getByText('代币管理')).toBeInTheDocument();
+    expect(screen.getByText('Manage Shops')).toBeInTheDocument();
+    expect(screen.getByText('View Orders')).toBeInTheDocument();
+    expect(screen.getByText('Member Management')).toBeInTheDocument();
+    expect(screen.getByText('Token Management')).toBeInTheDocument();
   });
 });

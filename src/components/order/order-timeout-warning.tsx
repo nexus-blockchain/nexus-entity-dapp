@@ -18,9 +18,9 @@ const TIMEOUT_RELEVANT_STATUSES = new Set<OrderStatus>([
   OrderStatus.Created,
   OrderStatus.Paid,
   OrderStatus.Shipped,
-  OrderStatus.ServiceStarted,
-  OrderStatus.ServiceCompleted,
-  OrderStatus.RefundRequested,
+  OrderStatus.Disputed,
+  OrderStatus.Processing,
+  OrderStatus.AwaitingConfirmation,
 ]);
 
 export function OrderTimeoutWarning({ updatedAt, currentBlock, status }: OrderTimeoutWarningProps) {

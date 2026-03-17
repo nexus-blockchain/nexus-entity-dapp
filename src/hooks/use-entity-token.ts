@@ -5,9 +5,9 @@ import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useWallet } from './use-wallet';
 import { STALE_TIMES } from '@/lib/chain/constants';
-import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
+import { KycLevel, TokenType, TransferRestrictionMode } from '@/lib/types/enums';
 import { decodeChainString } from '@/lib/utils/codec';
-import type { TokenConfig } from '@/lib/types/models';
+import type { TokenConfig, TokenDividendConfig } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
 
@@ -15,6 +15,63 @@ import type { TokenConfig } from '@/lib/types/models';
 function unwrapOption(raw: unknown): unknown | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
   return (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
+}
+
+function toPlainValue(raw: unknown): any {
+  const unwrapped = unwrapOption(raw);
+  if (unwrapped == null) return null;
+  return (unwrapped as { toJSON?: () => unknown }).toJSON?.() ?? unwrapped;
+}
+
+function parseBigIntValue(raw: unknown): bigint {
+  return BigInt(String(raw ?? 0));
+}
+
+export const ENTITY_TOKEN_ASSET_OFFSET = 1_000_000;
+
+export function getEntityTokenAssetId(entityId: number): number {
+  return ENTITY_TOKEN_ASSET_OFFSET + entityId;
+}
+
+function parseTokenDividendConfig(raw: unknown): TokenDividendConfig | null {
+  const value = toPlainValue(raw);
+  if (value == null) return null;
+  if (typeof value === 'boolean') {
+    return { enabled: value, minPeriod: 0 };
+  }
+  if (typeof value !== 'object') {
+    return null;
+  }
+
+  const obj = value as Record<string, unknown>;
+  return {
+    enabled: Boolean(obj.enabled ?? true),
+    minPeriod: Number(obj.minPeriod ?? obj.min_period ?? 0),
+  };
+}
+
+function parseAssetInfo(raw: unknown): { supply: bigint; accounts: number } | null {
+  const value = toPlainValue(raw);
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  return {
+    supply: parseBigIntValue(obj.supply ?? 0),
+    accounts: Number(obj.accounts ?? 0),
+  };
+}
+
+function parseAssetBalance(raw: unknown): bigint {
+  const value = toPlainValue(raw);
+  if (value == null) return BigInt(0);
+  if (typeof value !== 'object') return parseBigIntValue(value);
+  const obj = value as Record<string, unknown>;
+  return parseBigIntValue(
+    obj.balance ??
+    obj.free ??
+    obj.amount ??
+    obj.total ??
+    0,
+  );
 }
 
 /**
@@ -27,16 +84,16 @@ function parseTokenConfig(
   rawConfig: unknown,
   rawMetadata: unknown,
   entityId: number,
+  assetSupply: bigint | null,
 ): TokenConfig | null {
-  const config = unwrapOption(rawConfig);
-  if (!config) return null;
-  const cfg = config as Record<string, unknown>;
+  const cfg = toPlainValue(rawConfig) as Record<string, unknown> | null;
+  if (!cfg) return null;
 
   // Metadata is a tuple (name, symbol, decimals) or an object
   let name = '';
   let symbol = '';
   let decimals = 0;
-  const meta = unwrapOption(rawMetadata);
+  const meta = toPlainValue(rawMetadata);
   if (meta) {
     if (Array.isArray(meta)) {
       // Codec tuple: [name, symbol, decimals]
@@ -57,10 +114,18 @@ function parseTokenConfig(
     symbol,
     decimals,
     tokenType: String(cfg.tokenType ?? cfg.token_type ?? 'Points') as TokenType,
-    totalSupply: BigInt(String(cfg.totalSupply ?? cfg.total_supply ?? 0)),
-    maxSupply: BigInt(String(cfg.maxSupply ?? cfg.max_supply ?? 0)),
+    totalSupply: parseBigIntValue(cfg.totalSupply ?? cfg.total_supply ?? assetSupply ?? 0),
+    maxSupply: parseBigIntValue(cfg.maxSupply ?? cfg.max_supply ?? 0),
     transferRestriction: String(cfg.transferRestriction ?? cfg.transfer_restriction ?? 'None') as TransferRestrictionMode,
-    holderCount: Number(cfg.holderCount ?? cfg.holder_count ?? 0),
+    enabled: Boolean(cfg.enabled ?? true),
+    rewardRate: Number(cfg.rewardRate ?? cfg.reward_rate ?? 0),
+    exchangeRate: Number(cfg.exchangeRate ?? cfg.exchange_rate ?? 0),
+    minRedeem: parseBigIntValue(cfg.minRedeem ?? cfg.min_redeem ?? 0),
+    maxRedeemPerOrder: parseBigIntValue(cfg.maxRedeemPerOrder ?? cfg.max_redeem_per_order ?? 0),
+    transferable: Boolean(cfg.transferable ?? true),
+    createdAt: Number(cfg.createdAt ?? cfg.created_at ?? 0),
+    dividendConfig: parseTokenDividendConfig(cfg.dividendConfig ?? cfg.dividend_config),
+    minReceiverKyc: Number(cfg.minReceiverKyc ?? cfg.min_receiver_kyc ?? 0) as KycLevel,
   };
 }
 
@@ -85,6 +150,7 @@ export function getTokenRightsLabel(tokenType: TokenType): string {
 export function useEntityToken() {
   const { entityId } = useEntityContext();
   const { address } = useWallet();
+  const assetId = getEntityTokenAssetId(entityId);
 
   // Query token config (from EntityTokenConfigs + EntityTokenMetadata)
   const tokenConfigQuery = useEntityQuery<TokenConfig | null>(
@@ -92,59 +158,27 @@ export function useEntityToken() {
     async (api) => {
       if (!hasPallet(api, 'entityToken')) return null;
       const pallet = (api.query as any).entityToken;
-      const configFn = pallet.entityTokenConfigs ?? pallet.tokenConfigs ?? pallet.tokenConfig ?? pallet.tokens;
+      const configFn = pallet.entityTokenConfigs;
       if (!configFn) return null;
-      const metadataFn = pallet.entityTokenMetadata ?? pallet.tokenMetadata;
-      const [rawConfig, rawMetadata] = await Promise.all([
+      const metadataFn = pallet.entityTokenMetadata;
+      const assetInfoFn = (api.query as any).assets?.asset;
+      const [rawConfig, rawMetadata, rawAssetInfo] = await Promise.all([
         configFn(entityId),
         metadataFn ? metadataFn(entityId) : Promise.resolve(null),
+        assetInfoFn ? assetInfoFn(assetId) : Promise.resolve(null),
       ]);
-      return parseTokenConfig(rawConfig, rawMetadata, entityId);
+      return parseTokenConfig(rawConfig, rawMetadata, entityId, parseAssetInfo(rawAssetInfo)?.supply ?? null);
     },
     { staleTime: STALE_TIMES.token },
   );
 
-  // Query holder count
-  const holderCountQuery = useEntityQuery<number>(
-    ['entity', entityId, 'token', 'holderCount'],
+  const assetInfoQuery = useEntityQuery<{ supply: bigint; accounts: number } | null>(
+    ['entity', entityId, 'token', 'assetInfo'],
     async (api) => {
-      if (!hasPallet(api, 'entityToken')) return 0;
-      const fn = (api.query as any).entityToken.tokenHolderCount ?? (api.query as any).entityToken.holderCount;
-      if (!fn) return 0;
-      const raw = await fn(entityId);
-      return Number(raw?.toString() ?? 0);
-    },
-    { staleTime: STALE_TIMES.token },
-  );
-
-  // Query holders list
-  const holdersQuery = useEntityQuery<{ account: string; balance: bigint }[]>(
-    ['entity', entityId, 'token', 'holders'],
-    async (api) => {
-      if (!hasPallet(api, 'entityToken')) return [];
-      const storageFn = (api.query as any).entityToken.tokenHolders ?? (api.query as any).entityToken.holders;
-      if (!storageFn?.entries) return [];
-      try {
-        const raw = await storageFn.entries(entityId);
-        if (!raw || !Array.isArray(raw)) return [];
-        return raw.map(([key, value]: [any, any]) => ({
-          account: key.args[1]?.toString() ?? key.args[0]?.toString() ?? '',
-          balance: BigInt(String(value?.toString() ?? 0)),
-        }));
-      } catch {
-        // Fallback: single-key StorageMap, iterate all and filter
-        const raw = await storageFn.entries();
-        if (!raw || !Array.isArray(raw)) return [];
-        return raw
-          .filter(([, value]: [any, any]) => {
-            const obj = value?.toJSON?.() ?? value;
-            return Number(obj.entityId ?? obj.entity_id ?? 0) === entityId;
-          })
-          .map(([key, value]: [any, any]) => ({
-            account: key.args[1]?.toString() ?? key.args[0]?.toString() ?? '',
-            balance: BigInt(String(value?.toString() ?? 0)),
-          }));
-      }
+      const fn = (api.query as any).assets?.asset;
+      if (!fn) return null;
+      const raw = await fn(assetId);
+      return parseAssetInfo(raw);
     },
     { staleTime: STALE_TIMES.token },
   );
@@ -189,12 +223,11 @@ export function useEntityToken() {
   const myTokenBalanceQuery = useEntityQuery<bigint>(
     ['entity', entityId, 'token', 'myBalance', address],
     async (api) => {
-      if (!hasPallet(api, 'entityToken')) return BigInt(0);
       if (!address) return BigInt(0);
-      const fn = (api.query as any).entityToken.tokenHolders ?? (api.query as any).entityToken.holders;
+      const fn = (api.query as any).assets?.account;
       if (!fn) return BigInt(0);
-      const raw = await fn(entityId, address);
-      return BigInt(String(raw?.toString() ?? 0));
+      const raw = await fn(assetId, address);
+      return parseAssetBalance(raw);
     },
     { staleTime: STALE_TIMES.token, enabled: !!address },
   );
@@ -238,7 +271,7 @@ export function useEntityToken() {
     invalidateKeys: [['entity', entityId, 'token']],
   });
 
-  const transferTokens = useEntityMutation('entityToken', 'transfer', {
+  const transferTokens = useEntityMutation('entityToken', 'transferTokens', {
     invalidateKeys: [
       ['entity', entityId, 'token'],
       ['entity', entityId, 'token', 'holders'],
@@ -247,14 +280,16 @@ export function useEntityToken() {
   });
 
   return {
+    assetId,
     tokenConfig: tokenConfigQuery.data ?? null,
-    holderCount: holderCountQuery.data ?? 0,
-    holders: holdersQuery.data ?? [],
+    holderCount: assetInfoQuery.data?.accounts ?? 0,
+    holderListAvailable: false,
+    holders: [],
     whitelist: whitelistQuery.data ?? [],
     blacklist: blacklistQuery.data ?? [],
     myTokenBalance: myTokenBalanceQuery.data ?? BigInt(0),
-    isLoading: tokenConfigQuery.isLoading,
-    error: tokenConfigQuery.error,
+    isLoading: tokenConfigQuery.isLoading || assetInfoQuery.isLoading,
+    error: tokenConfigQuery.error ?? assetInfoQuery.error,
     createToken,
     mintTokens,
     burnTokens,

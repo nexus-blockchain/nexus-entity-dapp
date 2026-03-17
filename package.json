@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/fix-octal-escape.js",
     "dev": "rm -rf .next && next dev -p 3003",
-    "build": "next build && node scripts/spa-fallback.js",
+    "prebuild": "node scripts/fix-octal-escape.js",
+    "build": "rm -rf .next out && next build && node scripts/spa-fallback.js",
     "start": "serve out -s -l 3003",
     "lint": "next lint",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --run --coverage",
+    "check:runtime-compat": "node --input-type=module -e \"import('./scripts/check-runtime-compat.mjs')\" --",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "postinstall": "node scripts/fix-octal-escape.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -53,6 +57,9 @@
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.24.0",
     "zustand": "^5.0.0"
+  },
+  "overrides": {
+    "@scure/sr25519": "^1.0.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",

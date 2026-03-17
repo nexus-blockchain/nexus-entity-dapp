@@ -82,10 +82,18 @@ export interface ShopData {
   entityId: number;
   name: string;
   shopType: ShopType;
-  operatingStatus: string;
+  status: string;
   effectiveStatus: EffectiveShopStatus;
   fundBalance: bigint;
-  pointsConfig: PointsConfig | null;
+}
+
+// Shop points config (queried separately from entityLoyalty pallet)
+export interface ShopPointsConfig {
+  name: string;
+  symbol: string;
+  rewardRateBps: number;
+  exchangeRateBps: number;
+  transferable: boolean;
 }
 
 // 商品数据
@@ -93,37 +101,60 @@ export interface ProductData {
   id: number;
   shopId: number;
   nameCid: string;
-  imageCid: string;
+  imagesCid: string;
   detailCid: string;
-  priceNex: bigint;
-  priceUsdt: number;
+  price: bigint;
+  usdtPrice: number;
   stock: number;
   category: ProductCategory;
   visibility: ProductVisibility;
   levelGate: number | null;
   status: ProductStatus;
-  minQuantity: number;
-  maxQuantity: number;
+  sortWeight: number;
+  tagsCid: string | null;
+  skuCid: string | null;
+  minOrderQuantity: number;
+  maxOrderQuantity: number;
 }
 
 // 订单数据
 export interface OrderData {
   id: number;
+  entityId: number;
   shopId: number;
   productId: number;
   buyer: string;
+  seller: string;
+  payer: string;
   quantity: number;
+  unitPrice: bigint;
   paymentAsset: PaymentAsset;
   totalAmount: bigint;
+  platformFee: bigint;
+  productCategory: ProductCategory;
   status: OrderStatus;
   escrowId: number | null;
+  shippingCid: string | null;
+  trackingCid: string | null;
+  noteCid: string | null;
+  refundReasonCid: string | null;
+  disputeDeadline: number | null;
   createdAt: number;
+  shippedAt: number | null;
+  completedAt: number | null;
+  serviceStartedAt: number | null;
+  serviceCompletedAt: number | null;
+  confirmExtended: boolean;
+  disputeRejected: boolean;
   updatedAt: number;
-  /** 商品类别，用于确定订单流程分化。链上查询时从关联商品获取 */
-  productCategory?: ProductCategory;
 }
 
 // 代币配置
+export interface TokenDividendConfig {
+  enabled: boolean;
+  minPeriod: number;
+}
+
 export interface TokenConfig {
   entityId: number;
   name: string;
@@ -133,7 +164,15 @@ export interface TokenConfig {
   totalSupply: bigint;
   maxSupply: bigint;
   transferRestriction: TransferRestrictionMode;
-  holderCount: number;
+  enabled: boolean;
+  rewardRate: number;
+  exchangeRate: number;
+  minRedeem: bigint;
+  maxRedeemPerOrder: bigint;
+  transferable: boolean;
+  createdAt: number;
+  dividendConfig: TokenDividendConfig | null;
+  minReceiverKyc: KycLevel;
 }
 
 // 价格保护配置
@@ -153,6 +192,7 @@ export interface MarketOrder {
   amount: bigint;
   filled: bigint;
   createdAt: number;
+  depositWaived: boolean;
 }
 
 // 市场统计
@@ -176,12 +216,49 @@ export interface MemberData {
   orderCount: number;
 }
 
+// 待审批会员数据
+export interface PendingMemberData {
+  account: string;
+  referrer: string | null;
+  appliedAt: number;
+}
+
 // 自定义等级
 export interface CustomLevel {
+  id: number;
   name: string;
   threshold: bigint;
   discountRate: number;
   commissionBonus: number;
+}
+
+// 等级系统完整数据（含系统级配置）
+export interface LevelSystemData {
+  levels: CustomLevel[];
+  useCustom: boolean;
+  upgradeMode: string;
+}
+
+// 升级规则
+export interface UpgradeRule {
+  id: number;
+  name: string;
+  trigger: { type: string; data: Record<string, number> };
+  targetLevelId: number;
+  duration: number | null;
+  enabled: boolean;
+  priority: number;
+  stackable: boolean;
+  maxTriggers: number | null;
+  triggerCount: number;
+}
+
+// 升级规则系统
+export interface UpgradeRuleSystem {
+  rules: UpgradeRule[];
+  nextRuleId: number;
+  enabled: boolean;
+  conflictStrategy: string;
 }
 
 // 提案数据
@@ -190,8 +267,10 @@ export interface ProposalData {
   entityId: number;
   proposer: string;
   proposalType: string;
+  proposalPayload?: Record<string, unknown>;
   title: string;
   description: string;
+  descriptionCid: string;
   votesApprove: bigint;
   votesReject: bigint;
   votesAbstain: bigint;
@@ -202,13 +281,9 @@ export interface ProposalData {
   executed: boolean;
 }
 
-// 佣金配置
-export interface WithdrawalConfig {
-  minAmount: bigint;
-  feeRate: number;
-  cooldown: number;
-}
+// ─── Core Commission Types ──────────────────────────────────
 
+/** @deprecated Use CoreCommissionConfig instead */
 export interface CommissionConfig {
   entityId: number;
   enabled: boolean;
@@ -218,10 +293,98 @@ export interface CommissionConfig {
   withdrawalPaused: boolean;
 }
 
+/** @deprecated Use EntityWithdrawalConfig instead */
+export interface WithdrawalConfig {
+  minAmount: bigint;
+  feeRate: number;
+  cooldown: number;
+}
+
+export interface CoreCommissionConfig {
+  enabledModes: number;
+  maxCommissionRate: number;
+  enabled: boolean;
+  withdrawalCooldown: number;
+  creatorRewardRate: number;
+  tokenWithdrawalCooldown: number;
+}
+
+export type WithdrawalMode =
+  | { type: 'FullWithdrawal' }
+  | { type: 'FixedRate'; repurchaseRate: number }
+  | { type: 'LevelBased' }
+  | { type: 'MemberChoice'; minRepurchaseRate: number };
+
+export interface WithdrawalTierConfig {
+  withdrawalRate: number;
+  repurchaseRate: number;
+}
+
+export interface EntityWithdrawalConfig {
+  mode: WithdrawalMode;
+  defaultTier: WithdrawalTierConfig;
+  levelOverrides: [number, WithdrawalTierConfig][];
+  voluntaryBonusRate: number;
+  enabled: boolean;
+}
+
+export interface MemberCommissionStats {
+  totalEarned: bigint;
+  pending: bigint;
+  withdrawn: bigint;
+  repurchased: bigint;
+  orderCount: number;
+}
+
+export interface MemberTokenCommissionStats {
+  totalEarned: bigint;
+  pending: bigint;
+  withdrawn: bigint;
+  repurchased: bigint;
+  orderCount: number;
+}
+
+export interface WithdrawalRecord {
+  amount: bigint;
+  repurchaseAmount: bigint;
+  block: number;
+}
+
+export interface TokenWithdrawalRecord {
+  amount: bigint;
+  repurchaseAmount: bigint;
+  block: number;
+}
+
+export interface ShopCommissionTotals {
+  totalDistributed: bigint;
+  totalOrders: number;
+}
+
+// ─── Referral Extended Types ────────────────────────────────
+
+export interface ReferrerGuardConfig {
+  minReferrerSpent: bigint;
+  minReferrerOrders: number;
+}
+
+export interface CommissionCapConfig {
+  maxPerOrder: bigint;
+  maxTotalEarned: bigint;
+}
+
+export interface ReferralValidityConfig {
+  validityBlocks: number;
+  validOrders: number;
+}
+
 // 多级佣金层级
 export interface MultiLevelTier {
   rate: number;
-  minSales: bigint;
+  requiredDirects: number;
+  requiredTeamSize: number;
+  requiredSpent: bigint;
+  requiredLevelId: number;
 }
 
 // 多级佣金配置
@@ -232,9 +395,9 @@ export interface MultiLevelConfig {
 
 // 多级佣金统计
 export interface MultiLevelStats {
-  totalMembers: number;
   totalDistributed: bigint;
-  maxDepthReached: number;
+  totalOrders: number;
+  totalDistributionEntries: number;
 }
 
 // 会员关系
@@ -303,6 +466,13 @@ export interface SingleLinePosition {
   downlineCount: number;
 }
 
+// 单线等级层数覆盖
+export interface LevelBasedLevels {
+  levelId: number;
+  uplineLevels: number;
+  downlineLevels: number;
+}
+
 // 团队佣金配置
 export interface TeamConfig {
   enabled: boolean;
@@ -338,25 +508,44 @@ export interface TeamInfo {
 
 // 奖池佣金配置
 export interface PoolRewardConfig {
-  enabled: boolean;
   levelRatios: [number, number][];
   roundDuration: number;
+  tokenPoolEnabled: boolean;
 }
 
-// 奖池佣金统计
+// 奖池佣金统计 (DistributionStatistics)
 export interface PoolRewardStats {
-  poolBalance: bigint;
-  totalDistributed: bigint;
-  totalParticipants: number;
-  lastDistributionBlock: number;
+  totalNexDistributed: bigint;
+  totalTokenDistributed: bigint;
+  totalRoundsCompleted: number;
+  totalClaims: number;
 }
 
-// 奖池参与者
-export interface PoolParticipant {
-  account: string;
-  contribution: bigint;
-  share: number;
-  totalClaimed: bigint;
+// 等级快照
+export interface LevelSnapshot {
+  levelId: number;
+  memberCount: number;
+  perMemberReward: bigint;
+  claimedCount: number;
+}
+
+// 当前轮次信息
+export interface PoolRewardRoundInfo {
+  roundId: number;
+  startBlock: number;
+  poolSnapshot: bigint;
+  levelSnapshots: LevelSnapshot[];
+  tokenPoolSnapshot: bigint | null;
+  tokenLevelSnapshots: LevelSnapshot[] | null;
+}
+
+// 领取记录
+export interface PoolRewardClaimRecord {
+  roundId: number;
+  amount: bigint;
+  tokenAmount: bigint;
+  levelId: number;
+  claimedAt: number;
 }
 
 // KYC 记录
@@ -372,37 +561,48 @@ export interface KycRecord {
   expiresAt: number | null;
 }
 
-// Vesting 配置
+export interface EntityKycRequirement {
+  minLevel: KycLevel;
+  mandatory: boolean;
+  gracePeriod: number;
+  allowHighRiskCountries: boolean;
+  maxRiskScore: number;
+}
+
+// Vesting 配置（与链端 VestingConfig 一致）
 export interface VestingConfig {
-  cliffBlocks: number;
-  vestingBlocks: number;
+  vestingType: string;
+  initialUnlockBps: number;
+  cliffDuration: number;
+  totalDuration: number;
+  unlockInterval: number;
 }
 
-// 荷兰拍配置
-export interface DutchAuctionConfig {
-  startPrice: bigint;
-  endPrice: bigint;
-  decayBlocks: number;
-}
-
-// 发售轮次
+// 发售轮次（与链端 SaleRound 一致）
 export interface SaleRound {
   id: number;
   entityId: number;
-  name: string;
+  mode: string;
+  status: string;
   totalSupply: bigint;
-  price: bigint;
+  soldAmount: bigint;
+  remainingAmount: bigint;
+  participantsCount: number;
+  paymentOptionsCount: number;
+  vestingConfig: VestingConfig | null;
+  kycRequired: boolean;
+  minKycLevel: number;
   startBlock: number;
   endBlock: number;
-  minPurchase: bigint;
-  maxPurchase: bigint;
+  dutchStartPrice: bigint | null;
+  dutchEndPrice: bigint | null;
+  creator: string;
+  createdAt: number;
+  fundsWithdrawn: boolean;
+  cancelledAt: number | null;
+  totalRefundedTokens: bigint;
+  totalRefundedNex: bigint;
   softCap: bigint;
-  hardCap: bigint;
-  totalRaised: bigint;
-  participantCount: number;
-  vestingConfig: VestingConfig | null;
-  dutchAuction: DutchAuctionConfig | null;
-  status: string;
 }
 
 // 链上错误

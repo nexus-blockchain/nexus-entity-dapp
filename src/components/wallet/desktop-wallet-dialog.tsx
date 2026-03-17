@@ -31,9 +31,11 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 
+import { CopyableAddress } from '@/components/copyable-address';
+
 export function DesktopWalletDialog() {
   const t = useTranslations('wallet');
-  const { isConnected, getAccounts, connect, unlockDesktopAccount } = useWallet();
+  const { isConnected, connect, unlockDesktopAccount } = useWallet();
 
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -81,12 +83,19 @@ export function DesktopWalletDialog() {
 
   const loadAccounts = useCallback(async () => {
     try {
-      const accs = await getAccounts();
-      setExistingAccounts(accs);
+      const dk = await import('@/lib/wallet/desktop-keyring');
+      const builtIn = await dk.listAccounts();
+      setExistingAccounts(
+        builtIn.map((acc) => ({
+          address: acc.address,
+          meta: { name: acc.name, source: 'desktop-keyring' as const },
+          type: 'sr25519' as const,
+        })),
+      );
     } catch {
       setExistingAccounts([]);
     }
-  }, [getAccounts]);
+  }, []);
 
   const clearState = () => {
     setError(null);
@@ -168,11 +177,11 @@ export function DesktopWalletDialog() {
       if (address && password) {
         try {
           await unlockDesktopAccount(address, password);
-          const accs = await getAccounts();
-          const account = accs.find((a) => a.address === address);
-          if (account) {
-            await connect(account);
-          }
+          await connect({
+            address,
+            meta: { name: createName.trim() || 'Unknown', source: 'desktop-keyring' },
+            type: 'sr25519',
+          });
           setSuccess(t('mnemonicVerified'));
           setTimeout(() => setOpen(false), 800);
         } catch {
@@ -202,7 +211,7 @@ export function DesktopWalletDialog() {
       const { mnemonic, address } = await dk.createAccount(createName.trim(), createPassword);
       setGeneratedMnemonic(mnemonic);
       setCreatedAddress(address);
-      setSuccess(t('accountCreated', { address: `${address.slice(0, 8)}...${address.slice(-6)}` }));
+      setSuccess(t('accountCreated', { address }));
       await loadAccounts();
     } catch (err) {
       console.error('Create account error:', err);
@@ -221,21 +230,22 @@ export function DesktopWalletDialog() {
       const dk = await import('@/lib/wallet/desktop-keyring');
       const pwd = importPassword;
       const { address } = await dk.importAccount(importMnemonic.trim(), importName.trim(), pwd);
-      setSuccess(t('accountImported', { address: `${address.slice(0, 8)}...${address.slice(-6)}` }));
+      setSuccess(t('accountImported', { address }));
       resetImportForm();
       await loadAccounts();
 
       // Auto unlock & connect, then close dialog
       try {
         await unlockDesktopAccount(address, pwd);
-        const accs = await getAccounts();
-        const account = accs.find((a) => a.address === address);
-        if (account) {
-          await connect(account);
-        }
+        await connect({
+          address,
+          meta: { name: importName.trim(), source: 'desktop-keyring' },
+          type: 'sr25519',
+        });
         setTimeout(() => setOpen(false), 800);
-      } catch {
-        // unlock failed — dialog stays open so user can manually unlock
+      } catch (err) {
+        console.error('Auto-unlock after import failed:', err);
+        setError(err instanceof Error ? err.message : t('unlockFailed'));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -318,9 +328,6 @@ export function DesktopWalletDialog() {
     setTimeout(() => setCopiedField(null), 2000);
   }, []);
 
-  const shortenAddress = (addr: string) =>
-    addr.length > 16 ? `${addr.slice(0, 8)}...${addr.slice(-6)}` : addr;
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -380,8 +387,8 @@ export function DesktopWalletDialog() {
                   </button>
                   <div>
                     <p className="text-sm font-medium">{t('exportTitle')}</p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {shortenAddress(exportAddress)}
+                    <p className="font-mono text-xs text-muted-foreground break-all">
+                      {exportAddress}
                     </p>
                   </div>
                 </div>
@@ -509,8 +516,8 @@ export function DesktopWalletDialog() {
                       >
                         <div className="min-w-0 flex-1">
                           <p className="font-medium">{acc.meta.name}</p>
-                          <p className="truncate font-mono text-xs text-muted-foreground">
-                            {shortenAddress(acc.address)}
+                          <p className="font-mono text-xs text-muted-foreground break-all">
+                            {acc.address}
                           </p>
                         </div>
                         <div className="flex items-center gap-1">

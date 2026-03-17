@@ -5,10 +5,55 @@ import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useWalletStore } from '@/stores/wallet-store';
 import { STALE_TIMES } from '@/lib/chain/constants';
-import { OrderStatus, PaymentAsset } from '@/lib/types/enums';
+import { OrderStatus, PaymentAsset, ProductCategory } from '@/lib/types/enums';
 import type { OrderData } from '@/lib/types/models';
+import { decodeOptionalChainString } from '@/lib/utils/codec';
 
 // ─── Parser ─────────────────────────────────────────────────
+
+function unwrapChainOption(val: unknown): unknown | null {
+  if (val == null) return null;
+  if (typeof val === 'object') {
+    const maybeOption = val as { isNone?: boolean; unwrapOr?: (fallback: null) => unknown };
+    if (maybeOption.isNone) return null;
+    if (typeof maybeOption.unwrapOr === 'function') {
+      return maybeOption.unwrapOr(null) ?? null;
+    }
+  }
+  const normalized = String(val).trim().toLowerCase();
+  if (normalized === 'none' || normalized === 'null' || normalized === 'undefined') {
+    return null;
+  }
+  return val;
+}
+
+function parseOptionalNumber(val: unknown): number | null {
+  const unwrapped = unwrapChainOption(val);
+  if (unwrapped == null) return null;
+  const parsed = Number(unwrapped);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalAccount(val: unknown): string | null {
+  const unwrapped = unwrapChainOption(val);
+  if (unwrapped == null) return null;
+  const parsed = String(unwrapped).trim();
+  return parsed ? parsed : null;
+}
+
+function parseBoolean(val: unknown): boolean {
+  if (typeof val === 'boolean') return val;
+  if (val == null) return false;
+  if (typeof val === 'string') {
+    return val.trim().toLowerCase() === 'true';
+  }
+  if (typeof val === 'object') {
+    const rendered = String(val).trim().toLowerCase();
+    if (rendered === 'true') return true;
+    if (rendered === 'false') return false;
+  }
+  return Boolean(val);
+}
 
 function parseOrderData(raw: unknown): OrderData | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
@@ -16,18 +61,52 @@ function parseOrderData(raw: unknown): OrderData | null {
   if (!unwrapped) return null;
   const obj = unwrapped as Record<string, unknown>;
 
+  const buyer = String(obj.buyer ?? '');
+  const createdAt = Number(obj.createdAt ?? obj.created_at ?? 0);
+  const shippedAt = parseOptionalNumber(obj.shippedAt ?? obj.shipped_at);
+  const completedAt = parseOptionalNumber(obj.completedAt ?? obj.completed_at);
+  const serviceStartedAt = parseOptionalNumber(obj.serviceStartedAt ?? obj.service_started_at);
+  const serviceCompletedAt = parseOptionalNumber(obj.serviceCompletedAt ?? obj.service_completed_at);
+  const explicitUpdatedAt = Number(obj.updatedAt ?? obj.updated_at ?? 0);
+  const updatedAt = explicitUpdatedAt > 0
+    ? explicitUpdatedAt
+    : Math.max(
+        createdAt,
+        shippedAt ?? 0,
+        completedAt ?? 0,
+        serviceStartedAt ?? 0,
+        serviceCompletedAt ?? 0,
+      );
+
   return {
     id: Number(obj.id ?? 0),
-    shopId: Number(obj.shopId ?? 0),
-    productId: Number(obj.productId ?? 0),
-    buyer: String(obj.buyer ?? ''),
+    entityId: Number(obj.entityId ?? obj.entity_id ?? 0),
+    shopId: Number(obj.shopId ?? obj.shop_id ?? 0),
+    productId: Number(obj.productId ?? obj.product_id ?? 0),
+    buyer,
+    seller: String(obj.seller ?? ''),
+    payer: parseOptionalAccount(obj.payer) ?? buyer,
     quantity: Number(obj.quantity ?? 0),
-    paymentAsset: String(obj.paymentAsset ?? 'Native') as PaymentAsset,
-    totalAmount: BigInt(String(obj.totalAmount ?? 0)),
+    unitPrice: BigInt(String(obj.unitPrice ?? obj.unit_price ?? 0)),
+    paymentAsset: String(obj.paymentAsset ?? obj.payment_asset ?? 'Native') as PaymentAsset,
+    totalAmount: BigInt(String(obj.totalAmount ?? obj.total_amount ?? 0)),
+    platformFee: BigInt(String(obj.platformFee ?? obj.platform_fee ?? 0)),
+    productCategory: String(obj.productCategory ?? obj.product_category ?? 'Physical') as ProductCategory,
     status: String(obj.status ?? 'Created') as OrderStatus,
-    escrowId: obj.escrowId != null ? Number(obj.escrowId) : null,
-    createdAt: Number(obj.createdAt ?? 0),
-    updatedAt: Number(obj.updatedAt ?? 0),
+    escrowId: parseOptionalNumber(obj.escrowId ?? obj.escrow_id),
+    shippingCid: decodeOptionalChainString(obj.shippingCid ?? obj.shipping_cid),
+    trackingCid: decodeOptionalChainString(obj.trackingCid ?? obj.tracking_cid),
+    noteCid: decodeOptionalChainString(obj.noteCid ?? obj.note_cid),
+    refundReasonCid: decodeOptionalChainString(obj.refundReasonCid ?? obj.refund_reason_cid),
+    disputeDeadline: parseOptionalNumber(obj.disputeDeadline ?? obj.dispute_deadline),
+    createdAt,
+    shippedAt,
+    completedAt,
+    serviceStartedAt,
+    serviceCompletedAt,
+    confirmExtended: parseBoolean(obj.confirmExtended ?? obj.confirm_extended),
+    disputeRejected: parseBoolean(obj.disputeRejected ?? obj.dispute_rejected),
+    updatedAt,
   };
 }
 
@@ -39,8 +118,8 @@ export function useShopOrders(shopId: number) {
   const orderIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'shop', shopId, 'orders'],
     async (api) => {
-      if (!hasPallet(api, 'entityOrder')) return [];
-      const raw = await (api.query as any).entityOrder.shopOrders(shopId);
+      if (!hasPallet(api, 'entityTransaction')) return [];
+      const raw = await (api.query as any).entityTransaction.shopOrders(shopId);
       if (!raw) return [];
       const arr = raw.toJSON?.() ?? raw;
       return Array.isArray(arr) ? arr.map(Number) : [];
@@ -51,11 +130,11 @@ export function useShopOrders(shopId: number) {
   const ordersQuery = useEntityQuery<OrderData[]>(
     ['entity', entityId, 'shop', shopId, 'orders', 'data', orderIdsQuery.data],
     async (api) => {
-      if (!hasPallet(api, 'entityOrder')) return [];
+      if (!hasPallet(api, 'entityTransaction')) return [];
       const ids = orderIdsQuery.data;
       if (!ids || ids.length === 0) return [];
       const results = await Promise.all(
-        ids.map((id) => (api.query as any).entityOrder.orders(id)),
+        ids.map((id) => (api.query as any).entityTransaction.orders(id)),
       );
       return results
         .map((raw) => parseOrderData(raw))
@@ -68,39 +147,40 @@ export function useShopOrders(shopId: number) {
   );
 
   // Seller mutations
-  const confirmPayment = useEntityMutation('entityOrder', 'confirmPayment', {
+  const shipOrder = useEntityMutation('entityTransaction', 'shipOrder', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const confirmShipment = useEntityMutation('entityOrder', 'confirmShipment', {
+  const approveRefund = useEntityMutation('entityTransaction', 'approveRefund', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const approveRefund = useEntityMutation('entityOrder', 'approveRefund', {
+  const cancelOrder = useEntityMutation('entityTransaction', 'cancelOrder', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const cancelOrder = useEntityMutation('entityOrder', 'cancelOrder', {
+  const sellerCancelOrder = useEntityMutation('entityTransaction', 'sellerCancelOrder', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const completeOrder = useEntityMutation('entityOrder', 'completeOrder', {
+  const startService = useEntityMutation('entityTransaction', 'startService', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const startService = useEntityMutation('entityOrder', 'startService', {
+  const completeService = useEntityMutation('entityTransaction', 'completeService', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
-  const completeService = useEntityMutation('entityOrder', 'completeService', {
+  const cleanupShopOrders = useEntityMutation('entityTransaction', 'cleanupShopOrders', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
 
   return {
     orders: ordersQuery.data ?? [],
+    orderIndexCount: orderIdsQuery.data?.length ?? 0,
     isLoading: orderIdsQuery.isLoading || ordersQuery.isLoading,
     error: orderIdsQuery.error || ordersQuery.error,
-    confirmPayment,
-    confirmShipment,
+    shipOrder,
     approveRefund,
     cancelOrder,
-    completeOrder,
+    sellerCancelOrder,
     startService,
     completeService,
+    cleanupShopOrders,
   };
 }
 
@@ -113,9 +193,9 @@ export function useBuyerOrders() {
   const orderIdsQuery = useEntityQuery<number[]>(
     ['entity', entityId, 'orders', address],
     async (api) => {
-      if (!hasPallet(api, 'entityOrder')) return [];
+      if (!hasPallet(api, 'entityTransaction')) return [];
       if (!address) return [];
-      const raw = await (api.query as any).entityOrder.buyerOrders(address);
+      const raw = await (api.query as any).entityTransaction.buyerOrders(address);
       if (!raw) return [];
       const arr = raw.toJSON?.() ?? raw;
       return Array.isArray(arr) ? arr.map(Number) : [];
@@ -126,11 +206,11 @@ export function useBuyerOrders() {
   const ordersQuery = useEntityQuery<OrderData[]>(
     ['entity', entityId, 'orders', address, 'data', orderIdsQuery.data],
     async (api) => {
-      if (!hasPallet(api, 'entityOrder')) return [];
+      if (!hasPallet(api, 'entityTransaction')) return [];
       const ids = orderIdsQuery.data;
       if (!ids || ids.length === 0) return [];
       const results = await Promise.all(
-        ids.map((id) => (api.query as any).entityOrder.orders(id)),
+        ids.map((id) => (api.query as any).entityTransaction.orders(id)),
       );
       return results
         .map((raw) => parseOrderData(raw))
@@ -143,30 +223,35 @@ export function useBuyerOrders() {
   );
 
   // Buyer mutations
-  const placeOrder = useEntityMutation('entityOrder', 'placeOrder', {
+  const placeOrder = useEntityMutation('entityTransaction', 'placeOrder', {
     invalidateKeys: [['entity', entityId, 'orders', address]],
   });
-  const confirmReceipt = useEntityMutation('entityOrder', 'confirmReceipt', {
+  const confirmReceipt = useEntityMutation('entityTransaction', 'confirmReceipt', {
     invalidateKeys: [['entity', entityId, 'orders', address]],
   });
-  const requestRefund = useEntityMutation('entityOrder', 'requestRefund', {
+  const requestRefund = useEntityMutation('entityTransaction', 'requestRefund', {
     invalidateKeys: [['entity', entityId, 'orders', address]],
   });
-  const cancelOrder = useEntityMutation('entityOrder', 'cancelOrder', {
+  const cancelOrder = useEntityMutation('entityTransaction', 'cancelOrder', {
     invalidateKeys: [['entity', entityId, 'orders', address]],
   });
-  const confirmServiceCompletion = useEntityMutation('entityOrder', 'confirmServiceCompletion', {
+  const confirmService = useEntityMutation('entityTransaction', 'confirmService', {
+    invalidateKeys: [['entity', entityId, 'orders', address]],
+  });
+  const cleanupBuyerOrders = useEntityMutation('entityTransaction', 'cleanupBuyerOrders', {
     invalidateKeys: [['entity', entityId, 'orders', address]],
   });
 
   return {
     orders: ordersQuery.data ?? [],
+    orderIndexCount: orderIdsQuery.data?.length ?? 0,
     isLoading: orderIdsQuery.isLoading || ordersQuery.isLoading,
     error: orderIdsQuery.error || ordersQuery.error,
     placeOrder,
     confirmReceipt,
     requestRefund,
     cancelOrder,
-    confirmServiceCompletion,
+    confirmService,
+    cleanupBuyerOrders,
   };
 }

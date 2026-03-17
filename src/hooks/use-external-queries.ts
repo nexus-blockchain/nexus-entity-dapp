@@ -160,7 +160,7 @@ export function useEscrowStatus(escrowId: number | null | undefined): ExternalQu
     queryKey: ['external', 'escrow', escrowId],
     queryFn: async () => {
       if (!api) throw new Error('API not ready');
-      const raw = await (api.query as any).disputeEscrow.escrows(escrowId);
+      const raw = await (api.query as any).escrow.lockStateOf(escrowId);
       const parsed = parseEscrowData(raw);
       if (!parsed) throw new Error('Escrow not found');
       return parsed;
@@ -214,7 +214,7 @@ export function useStoragePinStatus(cid: string | null | undefined): ExternalQue
     queryKey: ['external', 'storage', cid],
     queryFn: async () => {
       if (!api) throw new Error('API not ready');
-      const raw = await (api.query as any).storageService.pins(cid);
+      const raw = await (api.query as any).storageService.pinStateOf(cid);
       const parsed = parseStoragePinData(raw);
       if (!parsed) throw new Error('Pin not found');
       return parsed;

@@ -7,17 +7,20 @@ import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useMultiLevelCommission } from '@/hooks/use-multi-level-commission';
+import { useMembers } from '@/hooks/use-members';
 import { useWalletStore } from '@/stores/wallet-store';
 
 import { useTranslations } from 'next-intl';
+import { formatNex } from '@/lib/utils/format';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -53,250 +56,429 @@ function MultiLevelSkeleton() {
   );
 }
 
-// ─── Config Section ─────────────────────────────────────────
+// ─── Config + Tiers Section (combined) ──────────────────────
 
-function ConfigSection() {
+interface DraftTier {
+  rate: string;
+  requiredDirects: string;
+  requiredTeamSize: string;
+  requiredSpent: string;
+  requiredLevelId: string;
+}
+
+const emptyDraft = (): DraftTier => ({ rate: '', requiredDirects: '', requiredTeamSize: '', requiredSpent: '', requiredLevelId: '0' });
+
+function tierToParams(t: { rate: number; requiredDirects: number; requiredTeamSize: number; requiredSpent: bigint | string; requiredLevelId: number }) {
+  return {
+    rate: t.rate,
+    requiredDirects: t.requiredDirects,
+    requiredTeamSize: t.requiredTeamSize,
+    requiredSpent: t.requiredSpent.toString(),
+    requiredLevelId: t.requiredLevelId,
+  };
+}
+
+function ConfigAndTiersSection() {
   const t = useTranslations('multiLevel');
   const { entityId } = useEntityContext();
-  const { config, setMultiLevelConfig, pauseMultiLevel, resumeMultiLevel } = useMultiLevelCommission();
+  const {
+    config, setMultiLevelConfig, clearMultiLevelConfig,
+    addTier, removeTier,
+  } = useMultiLevelCommission();
+  const { customLevels } = useMembers();
 
   const [maxTotalRate, setMaxTotalRate] = useState('');
-  // Tiers input as comma-separated "rate:minSales" pairs, e.g. "500:0, 300:1000000"
-  const [tiersInput, setTiersInput] = useState('');
 
-  const parseTiersInput = useCallback(() => {
-    return tiersInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const [rateStr, minSalesStr] = pair.split(':').map((s) => s.trim());
-        return { rate: Number(rateStr) || 0, minSales: minSalesStr || '0' };
-      });
-  }, [tiersInput]);
+  // For init mode: accumulate tiers locally before first save
+  const [draftTiers, setDraftTiers] = useState<DraftTier[]>([emptyDraft()]);
 
-  const handleSaveConfig = useCallback(
+  // For existing config: single add-tier form
+  const [newTier, setNewTier] = useState<DraftTier>(emptyDraft());
+  const [newIndex, setNewIndex] = useState('');
+
+  const tiers = config?.tiers ?? [];
+  const isInit = !config;
+
+  // ── Init mode: add/remove draft rows ──
+  const handleDraftChange = (index: number, field: keyof DraftTier, value: string) => {
+    setDraftTiers((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+  const handleAddDraftRow = () => setDraftTiers((prev) => [...prev, emptyDraft()]);
+  const handleRemoveDraftRow = (index: number) => setDraftTiers((prev) => prev.filter((_, i) => i !== index));
+
+  // ── Init save: setMultiLevelConfig with tiers ──
+  const handleInitSave = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      const tiers = parseTiersInput();
-      // setMultiLevelConfig(entityId, levels:Vec<MultiLevelTier>, maxTotalRate:u16)
+      const levels = draftTiers
+        .filter((d) => d.rate.trim())
+        .map((d) => ({
+          rate: Number(d.rate) || 0,
+          requiredDirects: Number(d.requiredDirects) || 0,
+          requiredTeamSize: Number(d.requiredTeamSize) || 0,
+          requiredSpent: d.requiredSpent.trim() || '0',
+          requiredLevelId: Number(d.requiredLevelId) || 0,
+        }));
+      if (levels.length === 0) return;
       setMultiLevelConfig.mutate([
         entityId,
-        tiers.length > 0
-          ? tiers.map((t) => ({ rate: t.rate, minSales: t.minSales }))
-          : config?.tiers?.map((t) => ({ rate: t.rate, minSales: t.minSales.toString() })) ?? [],
-        Number(maxTotalRate) || config?.maxTotalRate || 0,
+        levels,
+        Number(maxTotalRate) || 10000,
       ]);
     },
-    [entityId, maxTotalRate, parseTiersInput, config, setMultiLevelConfig],
+    [entityId, maxTotalRate, draftTiers, setMultiLevelConfig],
   );
 
-  const handleToggle = useCallback(() => {
-    if (config) {
-      if (config.tiers.length > 0) {
-        // Config exists, toggle pause/resume
-        pauseMultiLevel.mutate([entityId]);
-      } else {
-        resumeMultiLevel.mutate([entityId]);
-      }
-    } else {
-      // No config, create one
-      const tiers = parseTiersInput();
+  // ── Update maxTotalRate only (config exists) ──
+  const handleUpdateConfig = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!config) return;
       setMultiLevelConfig.mutate([
         entityId,
-        tiers.length > 0 ? tiers.map((t) => ({ rate: t.rate, minSales: t.minSales })) : [],
-        Number(maxTotalRate) || 0,
+        config.tiers.map(tierToParams),
+        Number(maxTotalRate) || config.maxTotalRate,
       ]);
-    }
-  }, [entityId, config, maxTotalRate, parseTiersInput, pauseMultiLevel, resumeMultiLevel, setMultiLevelConfig]);
+    },
+    [entityId, maxTotalRate, config, setMultiLevelConfig],
+  );
 
-  const isToggleBusy = isTxBusy(pauseMultiLevel) || isTxBusy(resumeMultiLevel) || isTxBusy(setMultiLevelConfig);
+  // ── Add single tier (config exists) ──
+  const handleAddTier = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newTier.rate.trim()) return;
+      const index = newIndex.trim() ? Number(newIndex) : tiers.length;
+      addTier.mutate([
+        entityId,
+        index,
+        {
+          rate: Number(newTier.rate),
+          requiredDirects: Number(newTier.requiredDirects) || 0,
+          requiredTeamSize: Number(newTier.requiredTeamSize) || 0,
+          requiredSpent: newTier.requiredSpent.trim() || '0',
+          requiredLevelId: Number(newTier.requiredLevelId) || 0,
+        },
+      ]);
+      setNewTier(emptyDraft());
+      setNewIndex('');
+    },
+    [entityId, newTier, newIndex, tiers.length, addTier],
+  );
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('configSection')}</CardTitle>
-        <CardDescription>{t('configSectionDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Current config display */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('maxTotalRate')}</p>
-            <p className="text-sm font-medium">{config?.maxTotalRate ?? 0} {t('bps')}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('tierCount')}</p>
-            <p className="text-sm font-medium">{config?.tiers?.length ?? 0}</p>
-          </div>
-        </div>
+  const handleClear = useCallback(() => {
+    clearMultiLevelConfig.mutate([entityId]);
+  }, [entityId, clearMultiLevelConfig]);
 
-        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-          <Separator className="my-4" />
-
-          {/* Full config form */}
-          <form onSubmit={handleSaveConfig} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+  // ── Render: init mode ──
+  if (isInit) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">{t('configSection')}</CardTitle>
+          <CardDescription>{t('initConfigDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={
+            <p className="text-sm text-muted-foreground">{t('noConfig')}</p>
+          }>
+            <form onSubmit={handleInitSave} className="space-y-4">
+              {/* Max total rate */}
               <div className="space-y-2">
-                <Label htmlFor="ml-max-total-rate">{t('maxTotalRate')}</Label>
+                <LabelWithTip htmlFor="ml-max-total-rate" tip={t('help.maxTotalRate')}>{t('maxTotalRate')}</LabelWithTip>
                 <Input
                   id="ml-max-total-rate"
                   type="number"
                   value={maxTotalRate}
                   onChange={(e) => setMaxTotalRate(e.target.value)}
-                  placeholder={String(config?.maxTotalRate ?? 0)}
-                  className="w-full"
+                  placeholder="10000"
+                  className="w-48"
                 />
                 <p className="text-xs text-muted-foreground">{t('maxTotalRateDesc')}</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="ml-tiers">{t('tiersInput')}</Label>
-                <Input
-                  id="ml-tiers"
-                  type="text"
-                  value={tiersInput}
-                  onChange={(e) => setTiersInput(e.target.value)}
-                  placeholder={t('tiersInputPlaceholder')}
-                />
-                <p className="text-xs text-muted-foreground">{t('tiersInputDesc')}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(setMultiLevelConfig)}>
-                {t('saveConfig')}
-              </Button>
-              <TxStatusIndicator txState={setMultiLevelConfig.txState} />
-            </div>
-          </form>
-        </PermissionGuard>
-      </CardContent>
-    </Card>
-  );
-}
 
-// ─── Tiers Table Section ──────────────────────────────────
+              <Separator />
 
-function TiersSection() {
-  const t = useTranslations('multiLevel');
-  const { entityId } = useEntityContext();
-  const { config, addTier, removeTier } = useMultiLevelCommission();
+              {/* Draft tiers */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium">{t('tiersSection')}</p>
+                <p className="text-xs text-muted-foreground">{t('initTiersHint')}</p>
 
-  const [newRate, setNewRate] = useState('');
-  const [newMinSales, setNewMinSales] = useState('');
-  const [newIndex, setNewIndex] = useState('');
-
-  const tiers = config?.tiers ?? [];
-
-  const handleAddTier = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!newRate.trim()) return;
-      const index = newIndex.trim() ? Number(newIndex) : tiers.length;
-      // addTier(entityId, index:u32, tier:Tier)
-      addTier.mutate([
-        entityId,
-        index,
-        { rate: Number(newRate), minSales: newMinSales.trim() || '0' },
-      ]);
-      setNewRate('');
-      setNewMinSales('');
-      setNewIndex('');
-    },
-    [entityId, newRate, newMinSales, newIndex, tiers.length, addTier],
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('tiersSection')}</CardTitle>
-        <CardDescription>{t('tiersSectionDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {tiers.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">{t('noTiers')}</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('tierIndex')}</TableHead>
-                <TableHead>{t('rate')}</TableHead>
-                <TableHead>{t('minSales')}</TableHead>
-                <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-                  <TableHead className="w-[120px]" />
-                </PermissionGuard>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tiers.map((tier, i) => (
-                <TableRow key={i}>
-                  <TableCell className="font-medium">L{i}</TableCell>
-                  <TableCell>{tier.rate} {t('bps')}</TableCell>
-                  <TableCell>{tier.minSales.toString()}</TableCell>
-                  <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => removeTier.mutate([entityId, i])}
-                        disabled={isTxBusy(removeTier)}
-                      >
+                {draftTiers.map((draft, i) => (
+                  <div key={i} className="flex items-end gap-3 flex-wrap rounded-md border p-3">
+                    <div className="shrink-0 flex items-center pt-5">
+                      <Badge variant="secondary">L{i}</Badge>
+                    </div>
+                    <div className="space-y-1">
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('newTierRate')}</p>}
+                      <Input
+                        type="number"
+                        value={draft.rate}
+                        onChange={(e) => handleDraftChange(i, 'rate', e.target.value)}
+                        placeholder="500"
+                        className="w-24"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredDirects')}</p>}
+                      <Input
+                        type="number"
+                        value={draft.requiredDirects}
+                        onChange={(e) => handleDraftChange(i, 'requiredDirects', e.target.value)}
+                        placeholder="0"
+                        className="w-24"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredTeamSize')}</p>}
+                      <Input
+                        type="number"
+                        value={draft.requiredTeamSize}
+                        onChange={(e) => handleDraftChange(i, 'requiredTeamSize', e.target.value)}
+                        placeholder="0"
+                        className="w-24"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredSpent')}</p>}
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={draft.requiredSpent}
+                        onChange={(e) => handleDraftChange(i, 'requiredSpent', e.target.value)}
+                        placeholder="0"
+                        className="w-28"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredLevelId')}</p>}
+                      <Select value={draft.requiredLevelId} onValueChange={(v) => handleDraftChange(i, 'requiredLevelId', v)}>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">{t('anyLevel')}</SelectItem>
+                          {customLevels.map((lv) => (
+                            <SelectItem key={lv.id} value={String(lv.id)}>{lv.name || `#${lv.id}`}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {draftTiers.length > 1 && (
+                      <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => handleRemoveDraftRow(i)}>
                         {t('removeTier')}
                       </Button>
-                    </TableCell>
+                    )}
+                  </div>
+                ))}
+
+                <Button type="button" variant="outline" size="sm" onClick={handleAddDraftRow}>
+                  + {t('addTier')}
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button type="submit" disabled={isTxBusy(setMultiLevelConfig)}>
+                  {t('saveConfig')}
+                </Button>
+                <TxStatusIndicator txState={setMultiLevelConfig.txState} />
+              </div>
+            </form>
+          </PermissionGuard>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ── Render: config exists ──
+  return (
+    <>
+      {/* Config card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">{t('configSection')}</CardTitle>
+          <CardDescription>{t('configSectionDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('maxTotalRate')}</p>
+              <p className="text-sm font-medium">{config.maxTotalRate} {t('bps')}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('tierCount')}</p>
+              <p className="text-sm font-medium">{config.tiers.length}</p>
+            </div>
+          </div>
+
+          <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+            <Separator className="my-4" />
+            <form onSubmit={handleUpdateConfig} className="space-y-4">
+              <div className="space-y-2">
+                <LabelWithTip htmlFor="ml-max-total-rate" tip={t('help.maxTotalRate')}>{t('maxTotalRate')}</LabelWithTip>
+                <Input
+                  id="ml-max-total-rate"
+                  type="number"
+                  value={maxTotalRate}
+                  onChange={(e) => setMaxTotalRate(e.target.value)}
+                  placeholder={String(config.maxTotalRate)}
+                  className="w-48"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button type="submit" disabled={isTxBusy(setMultiLevelConfig)}>
+                  {t('saveConfig')}
+                </Button>
+                <Button type="button" variant="destructive" onClick={handleClear} disabled={isTxBusy(clearMultiLevelConfig)}>
+                  {t('clearConfig')}
+                </Button>
+                <TxStatusIndicator txState={setMultiLevelConfig.txState} />
+                <TxStatusIndicator txState={clearMultiLevelConfig.txState} />
+              </div>
+            </form>
+          </PermissionGuard>
+        </CardContent>
+      </Card>
+
+      {/* Tiers card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">{t('tiersSection')}</CardTitle>
+          <CardDescription>{t('tiersSectionDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {tiers.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">{t('noTiers')}</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('tierIndex')}</TableHead>
+                  <TableHead>{t('rate')}</TableHead>
+                  <TableHead>{t('requiredDirects')}</TableHead>
+                  <TableHead>{t('requiredTeamSize')}</TableHead>
+                  <TableHead>{t('requiredSpent')}</TableHead>
+                  <TableHead>{t('requiredLevelId')}</TableHead>
+                  <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+                    <TableHead className="w-[120px]" />
                   </PermissionGuard>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+              </TableHeader>
+              <TableBody>
+                {tiers.map((tier, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">L{i}</TableCell>
+                    <TableCell>{tier.rate} {t('bps')}</TableCell>
+                    <TableCell>{tier.requiredDirects}</TableCell>
+                    <TableCell>{tier.requiredTeamSize}</TableCell>
+                    <TableCell>{formatNex(tier.requiredSpent)} USDT</TableCell>
+                    <TableCell>
+                      {tier.requiredLevelId === 0
+                        ? t('anyLevel')
+                        : (customLevels.find((lv) => lv.id === tier.requiredLevelId)?.name || `#${tier.requiredLevelId}`)}
+                    </TableCell>
+                    <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={() => removeTier.mutate([entityId, i])}
+                          disabled={isTxBusy(removeTier)}
+                        >
+                          {t('removeTier')}
+                        </Button>
+                      </TableCell>
+                    </PermissionGuard>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
-        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-          <Separator className="my-4" />
-          <form onSubmit={handleAddTier} className="flex items-end gap-3 flex-wrap">
-            <div className="space-y-2">
-              <Label htmlFor="ml-new-index">{t('tierIndex')}</Label>
-              <Input
-                id="ml-new-index"
-                type="number"
-                value={newIndex}
-                onChange={(e) => setNewIndex(e.target.value)}
-                placeholder={String(tiers.length)}
-                className="w-20"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ml-new-rate">{t('newTierRate')}</Label>
-              <Input
-                id="ml-new-rate"
-                type="number"
-                value={newRate}
-                onChange={(e) => setNewRate(e.target.value)}
-                className="w-28"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ml-new-min-sales">{t('minSales')}</Label>
-              <Input
-                id="ml-new-min-sales"
-                type="text"
-                inputMode="decimal"
-                value={newMinSales}
-                onChange={(e) => setNewMinSales(e.target.value)}
-                className="w-36"
-              />
-            </div>
-            <Button type="submit" disabled={isTxBusy(addTier)}>
-              {t('addTier')}
-            </Button>
-          </form>
-        </PermissionGuard>
-      </CardContent>
-      <CardFooter className="gap-3">
-        <TxStatusIndicator txState={addTier.txState} />
-        <TxStatusIndicator txState={removeTier.txState} />
-      </CardFooter>
-    </Card>
+          <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+            <Separator className="my-4" />
+            <form onSubmit={handleAddTier} className="space-y-3">
+              <div className="flex items-end gap-3 flex-wrap">
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.tierIndex')}>{t('tierIndex')}</LabelWithTip>
+                  <Input
+                    type="number"
+                    value={newIndex}
+                    onChange={(e) => setNewIndex(e.target.value)}
+                    placeholder={String(tiers.length)}
+                    className="w-20"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.newTierRate')}>{t('newTierRate')}</LabelWithTip>
+                  <Input
+                    type="number"
+                    value={newTier.rate}
+                    onChange={(e) => setNewTier((p) => ({ ...p, rate: e.target.value }))}
+                    className="w-28"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.requiredDirects')}>{t('requiredDirects')}</LabelWithTip>
+                  <Input
+                    type="number"
+                    value={newTier.requiredDirects}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredDirects: e.target.value }))}
+                    placeholder="0"
+                    className="w-28"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.requiredTeamSize')}>{t('requiredTeamSize')}</LabelWithTip>
+                  <Input
+                    type="number"
+                    value={newTier.requiredTeamSize}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredTeamSize: e.target.value }))}
+                    placeholder="0"
+                    className="w-28"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.requiredSpent')}>{t('requiredSpent')}</LabelWithTip>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={newTier.requiredSpent}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredSpent: e.target.value }))}
+                    placeholder="0"
+                    className="w-36"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <LabelWithTip tip={t('help.requiredLevelId')}>{t('requiredLevelId')}</LabelWithTip>
+                  <Select value={newTier.requiredLevelId} onValueChange={(v) => setNewTier((p) => ({ ...p, requiredLevelId: v }))}>
+                    <SelectTrigger className="w-36">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">{t('anyLevel')}</SelectItem>
+                      {customLevels.map((lv) => (
+                        <SelectItem key={lv.id} value={String(lv.id)}>{lv.name || `#${lv.id}`}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="submit" disabled={isTxBusy(addTier)}>
+                  {t('addTier')}
+                </Button>
+              </div>
+            </form>
+          </PermissionGuard>
+        </CardContent>
+        <CardFooter className="gap-3">
+          <TxStatusIndicator txState={addTier.txState} />
+          <TxStatusIndicator txState={removeTier.txState} />
+        </CardFooter>
+      </Card>
+    </>
   );
 }
 
@@ -316,20 +498,20 @@ function StatsSection() {
         <div className="grid grid-cols-3 gap-4">
           <Card className="shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalMembers')}</p>
-              <p className="text-lg font-semibold">{stats?.totalMembers ?? 0}</p>
+              <p className="text-xs text-muted-foreground">{t('totalOrders')}</p>
+              <p className="text-lg font-semibold">{stats?.totalOrders ?? 0}</p>
             </CardContent>
           </Card>
           <Card className="shadow-none">
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">{t('totalDistributed')}</p>
-              <p className="text-lg font-semibold">{stats?.totalDistributed?.toString() ?? '0'}</p>
+              <p className="text-lg font-semibold">{formatNex(stats?.totalDistributed ?? BigInt(0))} NEX</p>
             </CardContent>
           </Card>
           <Card className="shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('maxDepthReached')}</p>
-              <p className="text-lg font-semibold">{stats?.maxDepthReached ?? 0}</p>
+              <p className="text-xs text-muted-foreground">{t('totalDistributionEntries')}</p>
+              <p className="text-lg font-semibold">{stats?.totalDistributionEntries ?? 0}</p>
             </CardContent>
           </Card>
         </div>
@@ -427,8 +609,7 @@ export function MultiLevelPage() {
         </Link>
       </div>
 
-      <ConfigSection />
-      <TiersSection />
+      <ConfigAndTiersSection />
       <StatsSection />
       <MemberTreePreview />
     </div>

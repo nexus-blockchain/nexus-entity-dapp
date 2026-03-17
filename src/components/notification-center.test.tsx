@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@/test-setup';
 import React from 'react';
 import { NotificationCenter } from './notification-center';
 import type { Notification } from '@/lib/types/models';
@@ -10,7 +10,7 @@ function makeNotification(overrides: Partial<Notification> = {}): Notification {
     pallet: 'entityShop',
     event: 'ShopCreated',
     summary: 'A new shop has been created',
-    timestamp: Date.now() - 60_000, // 1 minute ago
+    timestamp: Date.now() - 60_000,
     read: false,
     ...overrides,
   };
@@ -26,7 +26,7 @@ describe('NotificationCenter', () => {
         onClearAll={vi.fn()}
       />,
     );
-    expect(screen.getByTestId('notification-bell')).toBeDefined();
+    expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
   });
 
   it('shows unread badge when unreadCount > 0', () => {
@@ -38,8 +38,7 @@ describe('NotificationCenter', () => {
         onClearAll={vi.fn()}
       />,
     );
-    const badge = screen.getByTestId('notification-badge');
-    expect(badge.textContent).toBe('3');
+    expect(screen.getByTestId('notification-badge')).toHaveTextContent('3');
   });
 
   it('does not show badge when unreadCount is 0', () => {
@@ -63,8 +62,7 @@ describe('NotificationCenter', () => {
         onClearAll={vi.fn()}
       />,
     );
-    const badge = screen.getByTestId('notification-badge');
-    expect(badge.textContent).toBe('99+');
+    expect(screen.getByTestId('notification-badge')).toHaveTextContent('99+');
   });
 
   it('toggles panel open/closed on bell click', () => {
@@ -76,13 +74,13 @@ describe('NotificationCenter', () => {
         onClearAll={vi.fn()}
       />,
     );
-    expect(screen.queryByTestId('notification-panel')).toBeNull();
+    expect(screen.queryByTestId('notification-panel')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('notification-bell'));
-    expect(screen.getByTestId('notification-panel')).toBeDefined();
+    expect(screen.getByTestId('notification-panel')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('notification-bell'));
-    expect(screen.queryByTestId('notification-panel')).toBeNull();
+    expect(screen.queryByTestId('notification-panel')).not.toBeInTheDocument();
   });
 
   it('shows empty state when no notifications', () => {
@@ -95,45 +93,33 @@ describe('NotificationCenter', () => {
       />,
     );
     fireEvent.click(screen.getByTestId('notification-bell'));
-    expect(screen.getByTestId('notification-empty')).toBeDefined();
+    expect(screen.getByTestId('notification-empty')).toBeInTheDocument();
   });
 
-  it('renders notification items', () => {
-    const n = makeNotification({ id: 'n1', summary: 'Test notification' });
-    render(
-      <NotificationCenter
-        notifications={[n]}
-        unreadCount={1}
-        onMarkAsRead={vi.fn()}
-        onClearAll={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('notification-bell'));
-    expect(screen.getByText('Test notification')).toBeDefined();
-    expect(screen.getByText('entityShop')).toBeDefined();
-  });
-
-  it('calls onMarkAsRead when mark-read button is clicked', () => {
+  it('renders notification items and mark-as-read button', () => {
     const onMarkAsRead = vi.fn();
-    const n = makeNotification({ id: 'n1' });
+    const notification = makeNotification({ id: 'n1', summary: 'Test notification' });
     render(
       <NotificationCenter
-        notifications={[n]}
+        notifications={[notification]}
         unreadCount={1}
         onMarkAsRead={onMarkAsRead}
         onClearAll={vi.fn()}
       />,
     );
+
     fireEvent.click(screen.getByTestId('notification-bell'));
+    expect(screen.getByText('Test notification')).toBeInTheDocument();
+    expect(screen.getByText('entityShop')).toBeInTheDocument();
+
     fireEvent.click(screen.getByTestId('notification-mark-read-n1'));
     expect(onMarkAsRead).toHaveBeenCalledWith('n1');
   });
 
   it('does not show mark-read button for already-read notifications', () => {
-    const n = makeNotification({ id: 'n1', read: true });
     render(
       <NotificationCenter
-        notifications={[n]}
+        notifications={[makeNotification({ id: 'n1', read: true })]}
         unreadCount={0}
         onMarkAsRead={vi.fn()}
         onClearAll={vi.fn()}
@@ -145,10 +131,9 @@ describe('NotificationCenter', () => {
 
   it('calls onClearAll when clear all button is clicked', () => {
     const onClearAll = vi.fn();
-    const n = makeNotification();
     render(
       <NotificationCenter
-        notifications={[n]}
+        notifications={[makeNotification()]}
         unreadCount={1}
         onMarkAsRead={vi.fn()}
         onClearAll={onClearAll}
@@ -159,33 +144,20 @@ describe('NotificationCenter', () => {
     expect(onClearAll).toHaveBeenCalledOnce();
   });
 
-  it('unread notification has blue background', () => {
-    const n = makeNotification({ id: 'n1', read: false });
+  it('uses design-token background classes for read state', () => {
     render(
       <NotificationCenter
-        notifications={[n]}
+        notifications={[
+          makeNotification({ id: 'n1', read: false }),
+          makeNotification({ id: 'n2', read: true, summary: 'Read notification' }),
+        ]}
         unreadCount={1}
         onMarkAsRead={vi.fn()}
         onClearAll={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByTestId('notification-bell'));
-    const item = screen.getByTestId('notification-item-n1');
-    expect(item.className).toContain('bg-blue-50');
-  });
-
-  it('read notification has white background', () => {
-    const n = makeNotification({ id: 'n1', read: true });
-    render(
-      <NotificationCenter
-        notifications={[n]}
-        unreadCount={0}
-        onMarkAsRead={vi.fn()}
-        onClearAll={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('notification-bell'));
-    const item = screen.getByTestId('notification-item-n1');
-    expect(item.className).toContain('bg-white');
+    expect(screen.getByTestId('notification-item-n1').className).toContain('bg-primary/5');
+    expect(screen.getByTestId('notification-item-n2').className).toContain('bg-background');
   });
 });

@@ -8,7 +8,7 @@ import { computeEffectiveShopStatus } from '@/lib/utils/shop-status';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import { decodeChainString, shopTreasuryAddress } from '@/lib/utils/codec';
 import { ShopOperatingStatus } from '@/lib/types/enums';
-import type { ShopData, PointsConfig } from '@/lib/types/models';
+import type { ShopData } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ function parseShopData(raw: unknown, entityStatus: string): ShopData | null {
   if (!unwrapped) return null;
   const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
 
-  const operatingStatus = String(obj.operatingStatus ?? obj.operating_status ?? 'Active') as ShopOperatingStatus;
+  const status = String(obj.status ?? obj.operatingStatus ?? obj.operating_status ?? 'Active') as ShopOperatingStatus;
   const fundBalance = BigInt(String(obj.fundBalance ?? obj.fund_balance ?? 0));
   const fundDepleted = fundBalance <= BigInt(0);
 
@@ -27,26 +27,13 @@ function parseShopData(raw: unknown, entityStatus: string): ShopData | null {
     entityId: Number(obj.entityId ?? obj.entity_id ?? 0),
     name: decodeChainString(obj.name),
     shopType: String(obj.shopType ?? obj.shop_type ?? 'OnlineStore') as ShopData['shopType'],
-    operatingStatus,
+    status,
     effectiveStatus: computeEffectiveShopStatus(
       entityStatus as any,
-      operatingStatus,
+      status,
       fundDepleted,
     ),
     fundBalance,
-    pointsConfig: obj.pointsConfig ?? obj.points_config
-      ? parsePointsConfig(obj.pointsConfig ?? obj.points_config)
-      : null,
-  };
-}
-
-function parsePointsConfig(raw: unknown): PointsConfig | null {
-  if (!raw || (raw as { isNone?: boolean }).isNone) return null;
-  const obj = (raw as any).toJSON?.() ?? raw;
-  return {
-    rewardRateBps: Number(obj.rewardRateBps ?? obj.reward_rate_bps ?? 0),
-    exchangeRateBps: Number(obj.exchangeRateBps ?? obj.exchange_rate_bps ?? 0),
-    transferable: Boolean(obj.transferable),
   };
 }
 
@@ -99,7 +86,7 @@ export function useShops() {
             const fundDepleted = shop.fundBalance <= BigInt(0);
             shop.effectiveStatus = computeEffectiveShopStatus(
               entityStatus as any,
-              shop.operatingStatus as ShopOperatingStatus,
+              shop.status as ShopOperatingStatus,
               fundDepleted,
             );
           } catch {

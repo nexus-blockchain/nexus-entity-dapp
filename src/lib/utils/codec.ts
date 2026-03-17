@@ -23,6 +23,32 @@ export function decodeChainString(val: unknown): string {
 }
 
 /**
+ * Decode an optional on-chain string value.
+ *
+ * Handles SCALE `Option<BoundedVec<u8>>`-style values and normalizes empty /
+ * placeholder strings (`'', 'null', 'None', 'undefined'`) to `null`.
+ */
+export function decodeOptionalChainString(val: unknown): string | null {
+  if (val == null) return null;
+
+  const unwrapped = typeof val === 'object' && val !== null && 'unwrapOr' in val
+    ? (val as { unwrapOr?: (fallback: null) => unknown }).unwrapOr?.(null) ?? null
+    : val;
+
+  if (unwrapped == null) return null;
+
+  const decoded = decodeChainString(unwrapped).trim();
+  if (!decoded) return null;
+
+  const normalized = decoded.toLowerCase();
+  if (normalized === 'null' || normalized === 'none' || normalized === 'undefined') {
+    return null;
+  }
+
+  return decoded;
+}
+
+/**
  * Derive the Entity treasury sub-account address from a PalletId and entity_id.
  *
  * Mirrors Substrate's `PalletId(*b"et/enty/").into_sub_account_truncating(entity_id)`.

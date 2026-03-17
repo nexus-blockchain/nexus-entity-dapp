@@ -11,11 +11,13 @@ import { DisclosureLevel, DisclosureStatus, InsiderRole } from '@/lib/types/enum
 interface DisclosureData {
   id: number;
   entityId: number;
-  title: string;
+  disclosureType: string;
   contentCid: string;
-  level: DisclosureLevel;
+  summaryCid: string | null;
+  discloser: string;
+  disclosedAt: number;
   status: DisclosureStatus;
-  createdAt: number;
+  previousId: number | null;
 }
 
 interface InsiderData {
@@ -29,9 +31,11 @@ interface AnnouncementData {
   title: string;
   contentCid: string;
   category: string;
-  pinned: boolean;
+  publisher: string;
+  publishedAt: number;
+  isPinned: boolean;
   expiresAt: number | null;
-  createdAt: number;
+  status: string;
 }
 
 // ─── Parsers ────────────────────────────────────────────────
@@ -40,16 +44,17 @@ function parseDisclosureEntries(rawEntries: [any, any][]): DisclosureData[] {
   if (!rawEntries || !Array.isArray(rawEntries)) return [];
   return rawEntries.map(([key, value]) => {
     const obj = value?.toJSON?.() ?? value;
-    // disclosures is a StorageMap (single key = disclosureId)
-    // key.args[0] = disclosureId; entityId is in the value struct
+    const rawType = obj.disclosureType ?? obj.disclosure_type ?? 'Other';
     return {
       id: Number(key.args?.[1]?.toString() ?? key.args?.[0]?.toString() ?? obj.id ?? 0),
       entityId: Number(obj.entityId ?? obj.entity_id ?? key.args?.[0]?.toString() ?? 0),
-      title: String(obj.title ?? ''),
+      disclosureType: typeof rawType === 'string' ? rawType : (typeof rawType === 'object' && rawType !== null ? Object.keys(rawType)[0] ?? 'Other' : 'Other'),
       contentCid: String(obj.contentCid ?? obj.content_cid ?? ''),
-      level: String(obj.level ?? 'Basic') as DisclosureLevel,
+      summaryCid: obj.summaryCid ?? obj.summary_cid ?? null,
+      discloser: String(obj.discloser ?? ''),
+      disclosedAt: Number(obj.disclosedAt ?? obj.disclosed_at ?? 0),
       status: String(obj.status ?? 'Draft') as DisclosureStatus,
-      createdAt: Number(obj.createdAt ?? obj.created_at ?? 0),
+      previousId: obj.previousId ?? obj.previous_id ?? null,
     };
   });
 }
@@ -70,14 +75,17 @@ function parseAnnouncementEntries(rawEntries: [any, any][]): AnnouncementData[] 
   if (!rawEntries || !Array.isArray(rawEntries)) return [];
   return rawEntries.map(([key, value]) => {
     const obj = value?.toJSON?.() ?? value;
+    const rawCat = obj.category ?? 'General';
     return {
       id: Number(key.args?.[1]?.toString() ?? obj.id ?? 0),
       title: String(obj.title ?? ''),
       contentCid: String(obj.contentCid ?? obj.content_cid ?? ''),
-      category: String(obj.category ?? ''),
-      pinned: Boolean(obj.pinned),
+      category: typeof rawCat === 'string' ? rawCat : (typeof rawCat === 'object' && rawCat !== null ? Object.keys(rawCat)[0] ?? 'General' : 'General'),
+      publisher: String(obj.publisher ?? ''),
+      publishedAt: Number(obj.publishedAt ?? obj.published_at ?? 0),
+      isPinned: Boolean(obj.isPinned ?? obj.is_pinned),
       expiresAt: obj.expiresAt ?? obj.expires_at ?? null,
-      createdAt: Number(obj.createdAt ?? obj.created_at ?? 0),
+      status: typeof obj.status === 'string' ? obj.status : (typeof obj.status === 'object' && obj.status !== null ? Object.keys(obj.status)[0] ?? 'Active' : 'Active'),
     };
   });
 }
@@ -104,10 +112,47 @@ export function useDisclosure() {
     async (api) => {
       if (!hasPallet(api, 'entityDisclosure')) return [];
       const pallet = (api.query as any).entityDisclosure;
+
+      // Prefer indexed lookup: entityDisclosures(entityId) → BoundedVec<u64>
+      const idsFn = pallet.entityDisclosures;
+      if (idsFn) {
+        try {
+          const idsRaw = await idsFn(entityId);
+          const ids = idsRaw?.toJSON?.() ?? idsRaw;
+          if (Array.isArray(ids) && ids.length > 0) {
+            const disclosureFn = pallet.disclosures;
+            if (disclosureFn) {
+              const results = await Promise.all(
+                ids.map(Number).map(async (disclosureId: number) => {
+                  const raw = await disclosureFn(disclosureId);
+                  if (!raw || (raw as any).isNone) return null;
+                  const obj = (raw as any).toJSON?.() ?? raw;
+                  const rawType = obj.disclosureType ?? obj.disclosure_type ?? 'Other';
+                  return {
+                    id: disclosureId,
+                    entityId: Number(obj.entityId ?? obj.entity_id ?? entityId),
+                    disclosureType: typeof rawType === 'string' ? rawType : (typeof rawType === 'object' && rawType !== null ? Object.keys(rawType)[0] ?? 'Other' : 'Other'),
+                    contentCid: String(obj.contentCid ?? obj.content_cid ?? ''),
+                    summaryCid: obj.summaryCid ?? obj.summary_cid ?? null,
+                    discloser: String(obj.discloser ?? ''),
+                    disclosedAt: Number(obj.disclosedAt ?? obj.disclosed_at ?? 0),
+                    status: String(obj.status ?? 'Draft') as DisclosureStatus,
+                    previousId: obj.previousId ?? obj.previous_id ?? null,
+                  } as DisclosureData;
+                }),
+              );
+              return results.filter((d): d is DisclosureData => d !== null);
+            }
+          }
+        } catch {
+          // fall through to entries scan
+        }
+      }
+
+      // Fallback: full scan (for chains without entityDisclosures index)
       const storageFn = pallet.disclosures;
       if (!storageFn?.entries) return [];
       const raw = await storageFn.entries();
-      // disclosures is a single-key StorageMap (key = disclosureId); filter by entityId client-side
       const filtered = (raw as [any, any][]).filter(([, value]: [any, any]) => {
         const obj = value?.toJSON?.() ?? value;
         const eid = Number(obj.entityId ?? obj.entity_id ?? 0);
@@ -122,10 +167,14 @@ export function useDisclosure() {
     ['entity', entityId, 'disclosure', 'level'],
     async (api) => {
       if (!hasPallet(api, 'entityDisclosure')) return null;
-      const fn = (api.query as any).entityDisclosure.disclosureLevel;
+      const fn = (api.query as any).entityDisclosure.disclosureConfigs;
       if (!fn) return null;
       const raw = await fn(entityId);
-      return String(raw?.toString() ?? 'Basic') as DisclosureLevel;
+      if (!raw || (raw as any).isNone) return null;
+      const obj = (raw as any).toJSON?.() ?? raw;
+      // Config struct has a 'level' field containing the DisclosureLevel enum
+      const level = obj?.level ?? obj;
+      return String(typeof level === 'string' ? level : (typeof level === 'object' && level !== null ? Object.keys(level)[0] : 'Basic')) as DisclosureLevel;
     },
     { staleTime: STALE_TIMES.members },
   );
@@ -156,7 +205,7 @@ export function useDisclosure() {
     ['entity', entityId, 'disclosure', 'blackout'],
     async (api) => {
       if (!hasPallet(api, 'entityDisclosure')) return null;
-      const fn = (api.query as any).entityDisclosure.blackoutPeriod;
+      const fn = (api.query as any).entityDisclosure.blackoutPeriods;
       if (!fn) return null;
       const raw = await fn(entityId);
       return parseBlackoutPeriod(raw);
@@ -169,6 +218,44 @@ export function useDisclosure() {
     async (api) => {
       if (!hasPallet(api, 'entityDisclosure')) return [];
       const pallet = (api.query as any).entityDisclosure;
+
+      // Prefer indexed lookup: entityAnnouncements(entityId) → BoundedVec<u64>
+      const idsFn = pallet.entityAnnouncements;
+      if (idsFn) {
+        try {
+          const idsRaw = await idsFn(entityId);
+          const ids = idsRaw?.toJSON?.() ?? idsRaw;
+          if (Array.isArray(ids) && ids.length > 0) {
+            const announcementFn = pallet.announcements;
+            if (announcementFn) {
+              const results = await Promise.all(
+                ids.map(Number).map(async (annId: number) => {
+                  const raw = await announcementFn(annId);
+                  if (!raw || (raw as any).isNone) return null;
+                  const obj = (raw as any).toJSON?.() ?? raw;
+                  const rawCat = obj.category ?? 'General';
+                  return {
+                    id: annId,
+                    title: String(obj.title ?? ''),
+                    contentCid: String(obj.contentCid ?? obj.content_cid ?? ''),
+                    category: typeof rawCat === 'string' ? rawCat : (typeof rawCat === 'object' && rawCat !== null ? Object.keys(rawCat)[0] ?? 'General' : 'General'),
+                    publisher: String(obj.publisher ?? ''),
+                    publishedAt: Number(obj.publishedAt ?? obj.published_at ?? 0),
+                    isPinned: Boolean(obj.isPinned ?? obj.is_pinned),
+                    expiresAt: obj.expiresAt ?? obj.expires_at ?? null,
+                    status: typeof obj.status === 'string' ? obj.status : (typeof obj.status === 'object' && obj.status !== null ? Object.keys(obj.status)[0] ?? 'Active' : 'Active'),
+                  } as AnnouncementData;
+                }),
+              );
+              return results.filter((a): a is AnnouncementData => a !== null);
+            }
+          }
+        } catch {
+          // fall through to entries scan
+        }
+      }
+
+      // Fallback: entries scan
       const announcementsFn = pallet.announcements;
       if (!announcementsFn?.entries) return [];
       let raw: [any, any][];
@@ -196,11 +283,12 @@ export function useDisclosure() {
   const addInsider = useEntityMutation('entityDisclosure', 'addInsider', { invalidateKeys });
   const updateInsiderRole = useEntityMutation('entityDisclosure', 'updateInsiderRole', { invalidateKeys });
   const removeInsider = useEntityMutation('entityDisclosure', 'removeInsider', { invalidateKeys });
-  const setDisclosureLevel = useEntityMutation('entityDisclosure', 'setDisclosureLevel', { invalidateKeys });
+  const configureDisclosure = useEntityMutation('entityDisclosure', 'configureDisclosure', { invalidateKeys });
   const publishAnnouncement = useEntityMutation('entityDisclosure', 'publishAnnouncement', { invalidateKeys });
   const updateAnnouncement = useEntityMutation('entityDisclosure', 'updateAnnouncement', { invalidateKeys });
   const withdrawAnnouncement = useEntityMutation('entityDisclosure', 'withdrawAnnouncement', { invalidateKeys });
   const pinAnnouncement = useEntityMutation('entityDisclosure', 'pinAnnouncement', { invalidateKeys });
+  const unpinAnnouncement = useEntityMutation('entityDisclosure', 'unpinAnnouncement', { invalidateKeys });
 
   return {
     // Query data
@@ -220,10 +308,11 @@ export function useDisclosure() {
     addInsider,
     updateInsiderRole,
     removeInsider,
-    setDisclosureLevel,
+    configureDisclosure,
     publishAnnouncement,
     updateAnnouncement,
     withdrawAnnouncement,
     pinAnnouncement,
+    unpinAnnouncement,
   };
 }

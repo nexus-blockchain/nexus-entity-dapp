@@ -1,5 +1,5 @@
 import { Keyring } from '@polkadot/keyring';
-import { mnemonicGenerate } from '@polkadot/util-crypto';
+import { cryptoWaitReady, mnemonicGenerate } from '@polkadot/util-crypto';
 import type { KeyringPair } from '@polkadot/keyring/types';
 import type { Signer, SignerResult } from '@polkadot/types/types';
 import type { SignerPayloadRaw, SignerPayloadJSON } from '@polkadot/types/types';
@@ -83,7 +83,16 @@ function lsDeleteMnemonic(address: string): void {
   localStorage.removeItem(lsMnemonicKey(address));
 }
 
-// ===== Mnemonic encryption (Web Crypto API: PBKDF2 + AES-GCM) =====
+// ===== Mnemonic encryption =====
+// Uses Web Crypto API (PBKDF2 + AES-GCM) when available (secure contexts),
+// falls back to @polkadot/util-crypto (naclEncrypt + scrypt) for insecure
+// contexts like http://<LAN-IP>:port during development.
+
+function isWebCryptoAvailable(): boolean {
+  return typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined';
+}
+
+// ----- Web Crypto path (PBKDF2 + AES-GCM) -----
 
 async function deriveEncryptionKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
   const encoder = new TextEncoder();
@@ -103,7 +112,7 @@ async function deriveEncryptionKey(password: string, salt: Uint8Array): Promise<
   );
 }
 
-async function encryptMnemonic(mnemonic: string, password: string): Promise<string> {
+async function encryptMnemonicWebCrypto(mnemonic: string, password: string): Promise<string> {
   const encoder = new TextEncoder();
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -121,7 +130,7 @@ async function encryptMnemonic(mnemonic: string, password: string): Promise<stri
   return btoa(Array.from(packed, (b) => String.fromCharCode(b)).join(''));
 }
 
-async function decryptMnemonic(encrypted: string, password: string): Promise<string> {
+async function decryptMnemonicWebCrypto(encrypted: string, password: string): Promise<string> {
   const packed = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
   const salt = packed.slice(0, 16);
   const iv = packed.slice(16, 28);
@@ -133,6 +142,71 @@ async function decryptMnemonic(encrypted: string, password: string): Promise<str
     ciphertext,
   );
   return new TextDecoder().decode(plaintext);
+}
+
+// ----- Fallback path (nacl from @polkadot/util-crypto) -----
+// Uses naclEncrypt/naclDecrypt with a key derived by hashing the password.
+// Format prefix "nacl:" distinguishes from Web Crypto data.
+
+async function deriveNaclKey(password: string, salt: Uint8Array): Promise<Uint8Array> {
+  const { blake2AsU8a } = await import('@polkadot/util-crypto');
+  const encoder = new TextEncoder();
+  const pwBytes = encoder.encode(password);
+  const input = new Uint8Array(pwBytes.length + salt.length);
+  input.set(pwBytes, 0);
+  input.set(salt, pwBytes.length);
+  return blake2AsU8a(input, 256);
+}
+
+async function encryptMnemonicFallback(mnemonic: string, password: string): Promise<string> {
+  const { naclEncrypt, randomAsU8a } = await import('@polkadot/util-crypto');
+  const salt = randomAsU8a(16);
+  const secret = await deriveNaclKey(password, salt);
+  const encoder = new TextEncoder();
+  const { encrypted, nonce } = naclEncrypt(encoder.encode(mnemonic), secret);
+  // Pack: salt(16) + nonce(24) + encrypted
+  const packed = new Uint8Array(salt.length + nonce.length + encrypted.length);
+  packed.set(salt, 0);
+  packed.set(nonce, salt.length);
+  packed.set(encrypted, salt.length + nonce.length);
+  return 'nacl:' + btoa(Array.from(packed, (b) => String.fromCharCode(b)).join(''));
+}
+
+async function decryptMnemonicFallback(encrypted: string, password: string): Promise<string> {
+  const { naclDecrypt } = await import('@polkadot/util-crypto');
+  const raw = encrypted.startsWith('nacl:') ? encrypted.slice(5) : encrypted;
+  const packed = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+  const salt = packed.slice(0, 16);
+  const nonce = packed.slice(16, 40);
+  const ciphertext = packed.slice(40);
+  const secret = await deriveNaclKey(password, salt);
+  const plaintext = naclDecrypt(ciphertext, nonce, secret);
+  if (!plaintext) throw new Error('Decryption failed');
+  return new TextDecoder().decode(plaintext);
+}
+
+// ----- Unified API -----
+
+async function encryptMnemonic(mnemonic: string, password: string): Promise<string> {
+  if (isWebCryptoAvailable()) {
+    return encryptMnemonicWebCrypto(mnemonic, password);
+  }
+  return encryptMnemonicFallback(mnemonic, password);
+}
+
+async function decryptMnemonic(encrypted: string, password: string): Promise<string> {
+  // Detect format by prefix
+  if (encrypted.startsWith('nacl:')) {
+    return decryptMnemonicFallback(encrypted, password);
+  }
+  // Web Crypto format — requires crypto.subtle
+  if (isWebCryptoAvailable()) {
+    return decryptMnemonicWebCrypto(encrypted, password);
+  }
+  throw new Error(
+    'Cannot decrypt: this mnemonic was encrypted with Web Crypto which is unavailable in insecure contexts. ' +
+    'Access the app via https:// or localhost to decrypt.',
+  );
 }
 
 async function storeMnemonic(address: string, mnemonic: string, password: string): Promise<void> {
@@ -173,6 +247,7 @@ export async function createAccount(
   name: string,
   password: string,
 ): Promise<{ mnemonic: string; address: string }> {
+  await cryptoWaitReady();
   const mnemonic = mnemonicGenerate();
   const keyring = getKeyring();
   const pair = keyring.addFromMnemonic(mnemonic, { name });
@@ -202,6 +277,7 @@ export async function importAccount(
   const cleaned = mnemonic.trim().replace(/\s+/g, ' ').toLowerCase();
 
   const { mnemonicValidate } = await import('@polkadot/util-crypto');
+  await cryptoWaitReady();
   if (!mnemonicValidate(cleaned)) {
     throw new Error('Invalid mnemonic phrase');
   }
@@ -279,6 +355,7 @@ export async function unlockAccount(
   address: string,
   password: string,
 ): Promise<{ pair: KeyringPair; signer: Signer }> {
+  await cryptoWaitReady();
   let content: string;
 
   if (isTauri()) {

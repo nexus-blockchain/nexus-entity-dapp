@@ -6,7 +6,7 @@ import { useDisclosure } from '@/hooks/use-disclosure';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
-import { DisclosureLevel, DisclosureStatus, InsiderRole } from '@/lib/types/enums';
+import { DisclosureLevel, DisclosureStatus, InsiderRole, DisclosureType, AnnouncementCategory } from '@/lib/types/enums';
 import { useCurrentBlock } from '@/hooks/use-current-block';
 
 import { useTranslations } from 'next-intl';
@@ -21,15 +21,13 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils/cn';
+import { CopyableAddress } from '@/components/copyable-address';
+import { LabelWithTip } from '@/components/field-help-tip';
 
 // ─── Helpers ────────────────────────────────────────────────
 
 function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
-
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-6)}` : addr;
 }
 
 const DISCLOSURE_LEVELS: { key: DisclosureLevel }[] = [
@@ -45,6 +43,8 @@ const STATUS_VARIANT: Record<DisclosureStatus, 'secondary' | 'success' | 'destru
   [DisclosureStatus.Withdrawn]: 'destructive',
   [DisclosureStatus.Corrected]: 'warning',
 };
+
+const ANNOUNCEMENT_CATEGORIES = Object.values(AnnouncementCategory);
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -94,13 +94,14 @@ function LevelConfigSection() {
   const t = useTranslations('disclosure');
   const te = useTranslations('enums');
   const { entityId } = useEntityContext();
-  const { disclosureLevel, setDisclosureLevel } = useDisclosure();
+  const { disclosureLevel, configureDisclosure } = useDisclosure();
 
   const handleSetLevel = useCallback(
     (level: DisclosureLevel) => {
-      setDisclosureLevel.mutate([entityId, level]);
+      // Pallet: configure_disclosure(entity_id, level, insider_trading_control, blackout_after)
+      configureDisclosure.mutate([entityId, level, false, 0]);
     },
-    [entityId, setDisclosureLevel],
+    [entityId, configureDisclosure],
   );
 
   const LEVEL_KEY_MAP: Record<DisclosureLevel, { label: string; desc: string }> = {
@@ -126,7 +127,7 @@ function LevelConfigSection() {
                 disclosureLevel === key && 'ring-2 ring-primary ring-offset-2',
               )}
               onClick={() => handleSetLevel(key)}
-              disabled={isTxBusy(setDisclosureLevel)}
+              disabled={isTxBusy(configureDisclosure)}
             >
               <span className="text-sm font-medium">{LEVEL_KEY_MAP[key].label}</span>
               <span className={cn(
@@ -138,7 +139,7 @@ function LevelConfigSection() {
         </div>
       </CardContent>
       <CardFooter>
-        <TxStatusIndicator txState={setDisclosureLevel.txState} />
+        <TxStatusIndicator txState={configureDisclosure.txState} />
       </CardFooter>
     </Card>
   );
@@ -189,7 +190,7 @@ function BlackoutSection() {
             <div className="mt-2 flex flex-wrap gap-2">
               {insiders.map((i) => (
                 <Badge key={i.account} variant="destructive" className="text-xs">
-                  {shortAddr(i.account)} ({te(`insiderRole.${i.role}`)})
+                  <CopyableAddress address={i.account} textClassName="text-xs" hideCopyIcon /> ({te(`insiderRole.${i.role}`)})
                 </Badge>
               ))}
             </div>
@@ -212,44 +213,46 @@ function DisclosureListSection() {
     withdrawDisclosure, correctDisclosure,
   } = useDisclosure();
 
-  const [title, setTitle] = useState('');
+  const [disclosureType, setDisclosureType] = useState<string>(DisclosureType.AnnualReport);
   const [contentCid, setContentCid] = useState('');
-  const [level, setLevel] = useState<DisclosureLevel>(DisclosureLevel.Basic);
+  const [summaryCid, setSummaryCid] = useState('');
   const [editId, setEditId] = useState<number | null>(null);
-  const [editTitle, setEditTitle] = useState('');
   const [editCid, setEditCid] = useState('');
+  const [editSummaryCid, setEditSummaryCid] = useState('');
   const [correctId, setCorrectId] = useState<number | null>(null);
   const [correctCid, setCorrectCid] = useState('');
+  const [correctSummaryCid, setCorrectSummaryCid] = useState('');
 
   const handleCreate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!title.trim() || !contentCid.trim()) return;
-      createDraftDisclosure.mutate([entityId, title.trim(), contentCid.trim(), level]);
-      setTitle('');
+      if (!contentCid.trim()) return;
+      createDraftDisclosure.mutate([entityId, disclosureType, contentCid.trim(), summaryCid.trim() || null]);
       setContentCid('');
+      setSummaryCid('');
     },
-    [entityId, title, contentCid, level, createDraftDisclosure],
+    [entityId, disclosureType, contentCid, summaryCid, createDraftDisclosure],
   );
 
   const handleUpdate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (editId === null || !editTitle.trim() || !editCid.trim()) return;
-      updateDraft.mutate([entityId, editId, editTitle.trim(), editCid.trim()]);
+      if (editId === null || !editCid.trim()) return;
+      updateDraft.mutate([editId, editCid.trim(), editSummaryCid.trim() || null]);
       setEditId(null);
     },
-    [entityId, editId, editTitle, editCid, updateDraft],
+    [editId, editCid, editSummaryCid, updateDraft],
   );
 
   const handleCorrect = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (correctId === null || !correctCid.trim()) return;
-      correctDisclosure.mutate([entityId, correctId, correctCid.trim()]);
+      correctDisclosure.mutate([correctId, correctCid.trim(), correctSummaryCid.trim() || null]);
       setCorrectId(null);
+      setCorrectSummaryCid('');
     },
-    [entityId, correctId, correctCid, correctDisclosure],
+    [correctCid, correctId, correctSummaryCid, correctDisclosure],
   );
 
   return (
@@ -261,27 +264,30 @@ function DisclosureListSection() {
         {/* Create draft form */}
         <form onSubmit={handleCreate} className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t('createDraft')}</h3>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="disc-title">{t('titleLabel')}</Label>
-              <Input id="disc-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('titleLabel')} />
+              <LabelWithTip htmlFor="disc-type" tip={t('help.disclosureType')}>{t('disclosureType')}</LabelWithTip>
+              <Select value={disclosureType} onValueChange={setDisclosureType}>
+                <SelectTrigger id="disc-type">
+                  <SelectValue placeholder={t('disclosureType')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.values(DisclosureType).map((dtype) => (
+                    <SelectItem key={dtype} value={dtype}>{dtype}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="disc-cid">{t('contentCid')}</Label>
+              <LabelWithTip htmlFor="disc-cid" tip={t('help.contentCid')}>{t('contentCid')}</LabelWithTip>
               <Input id="disc-cid" value={contentCid} onChange={(e) => setContentCid(e.target.value)} placeholder={t('contentCid')} />
+            </div>
+            <div className="space-y-1.5">
+              <LabelWithTip htmlFor="disc-summary" tip={t('help.summaryCid')}>{t('summaryCid')}</LabelWithTip>
+              <Input id="disc-summary" value={summaryCid} onChange={(e) => setSummaryCid(e.target.value)} placeholder={t('summaryCidOptional')} />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Select value={level} onValueChange={(v) => setLevel(v as DisclosureLevel)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DISCLOSURE_LEVELS.map(({ key }) => (
-                  <SelectItem key={key} value={key}>{te(`disclosureLevel.${key}`)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button type="submit" disabled={isTxBusy(createDraftDisclosure)}>
               {t('createDraft')}
             </Button>
@@ -301,7 +307,7 @@ function DisclosureListSection() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">#{d.id} {d.title}</span>
+                      <span className="text-sm font-medium">#{d.id} [{d.disclosureType}]</span>
                       <Badge variant={STATUS_VARIANT[d.status]}>
                         {te(`disclosureStatus.${d.status}`)}
                       </Badge>
@@ -310,11 +316,11 @@ function DisclosureListSection() {
                       {d.status === DisclosureStatus.Draft && (
                         <>
                           <Button variant="secondary" size="sm"
-                            onClick={() => { setEditId(d.id); setEditTitle(d.title); setEditCid(d.contentCid); }}>
+                            onClick={() => { setEditId(d.id); setEditCid(d.contentCid); setEditSummaryCid(''); }}>
                             {tc('edit')}
                           </Button>
                           <Button variant="default" size="sm"
-                            onClick={() => publishDraft.mutate([entityId, d.id])}
+                            onClick={() => publishDraft.mutate([d.id])}
                             disabled={isTxBusy(publishDraft)}>
                             {t('publish')}
                           </Button>
@@ -323,20 +329,20 @@ function DisclosureListSection() {
                       {d.status === DisclosureStatus.Published && (
                         <>
                           <Button variant="destructive" size="sm"
-                            onClick={() => withdrawDisclosure.mutate([entityId, d.id])}
+                            onClick={() => withdrawDisclosure.mutate([d.id])}
                             disabled={isTxBusy(withdrawDisclosure)}>
                             {t('withdraw')}
                           </Button>
                           <Button variant="outline" size="sm"
                             className="border-yellow-500 text-yellow-700 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-950"
-                            onClick={() => { setCorrectId(d.id); setCorrectCid(''); }}>
+                            onClick={() => { setCorrectId(d.id); setCorrectCid(''); setCorrectSummaryCid(''); }}>
                             {t('correct')}
                           </Button>
                         </>
                       )}
                     </div>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">CID: {d.contentCid} · {te(`disclosureLevel.${d.level}`)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">CID: {d.contentCid}{d.summaryCid && <> · Summary: {d.summaryCid}</>}</p>
                 </CardContent>
               </Card>
             ))}
@@ -351,12 +357,12 @@ function DisclosureListSection() {
               <h3 className="text-sm font-medium text-muted-foreground">{t('editDraft', { id: editId })}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-title">{t('titleLabel')}</Label>
-                  <Input id="edit-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('titleLabel')} />
+                  <LabelWithTip htmlFor="edit-cid" tip={t('help.contentCid')}>{t('contentCid')}</LabelWithTip>
+                  <Input id="edit-cid" value={editCid} onChange={(e) => setEditCid(e.target.value)} placeholder={t('contentCid')} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-cid">{t('contentCid')}</Label>
-                  <Input id="edit-cid" value={editCid} onChange={(e) => setEditCid(e.target.value)} placeholder={t('contentCid')} />
+                  <LabelWithTip htmlFor="edit-summary" tip={t('help.summaryCid')}>{t('summaryCid')}</LabelWithTip>
+                  <Input id="edit-summary" value={editSummaryCid} onChange={(e) => setEditSummaryCid(e.target.value)} placeholder={t('summaryCidOptional')} />
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -374,9 +380,15 @@ function DisclosureListSection() {
             <Separator />
             <form onSubmit={handleCorrect} className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground">{t('correctDisclosure', { id: correctId })}</h3>
-              <div className="space-y-1.5">
-                <Label htmlFor="correct-cid">{t('correctContentCid')}</Label>
-                <Input id="correct-cid" value={correctCid} onChange={(e) => setCorrectCid(e.target.value)} placeholder={t('correctContentCid')} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="correct-cid">{t('correctContentCid')}</Label>
+                  <Input id="correct-cid" value={correctCid} onChange={(e) => setCorrectCid(e.target.value)} placeholder={t('correctContentCid')} />
+                </div>
+                <div className="space-y-1.5">
+                  <LabelWithTip htmlFor="correct-summary" tip={t('help.summaryCid')}>{t('summaryCid')}</LabelWithTip>
+                  <Input id="correct-summary" value={correctSummaryCid} onChange={(e) => setCorrectSummaryCid(e.target.value)} placeholder={t('summaryCidOptional')} />
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <Button type="submit" variant="outline"
@@ -429,7 +441,7 @@ function InsiderSection() {
       <CardContent className="space-y-4">
         <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
-            <Label htmlFor="insider-account">{t('accountAddress')}</Label>
+            <LabelWithTip htmlFor="insider-account" tip={t('help.accountAddress')}>{t('accountAddress')}</LabelWithTip>
             <Input id="insider-account" value={account} onChange={(e) => setAccount(e.target.value)}
               placeholder={t('accountAddress')} className="w-64" />
           </div>
@@ -464,7 +476,7 @@ function InsiderSection() {
             <TableBody>
               {insiders.map((ins) => (
                 <TableRow key={ins.account}>
-                  <TableCell className="font-mono text-sm">{shortAddr(ins.account)}</TableCell>
+                  <TableCell><CopyableAddress address={ins.account} textClassName="text-xs" /></TableCell>
                   <TableCell>
                     <Badge variant="secondary">{te(`insiderRole.${ins.role}`)}</Badge>
                   </TableCell>
@@ -504,40 +516,65 @@ function AnnouncementSection() {
   const t = useTranslations('disclosure');
   const tc = useTranslations('common');
   const { entityId } = useEntityContext();
-  const { announcements, publishAnnouncement, updateAnnouncement, withdrawAnnouncement, pinAnnouncement } = useDisclosure();
+  const {
+    announcements,
+    publishAnnouncement,
+    updateAnnouncement,
+    withdrawAnnouncement,
+    pinAnnouncement,
+    unpinAnnouncement,
+  } = useDisclosure();
 
   const [title, setTitle] = useState('');
   const [contentCid, setContentCid] = useState('');
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState<(typeof ANNOUNCEMENT_CATEGORIES)[number]>(ANNOUNCEMENT_CATEGORIES[0] as (typeof ANNOUNCEMENT_CATEGORIES)[number]);
   const [expiresAt, setExpiresAt] = useState('');
   const [editId, setEditId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editCid, setEditCid] = useState('');
+  const [editCategory, setEditCategory] = useState<(typeof ANNOUNCEMENT_CATEGORIES)[number] | ''>('');
+  const [editExpiresAt, setEditExpiresAt] = useState('');
 
   const handlePublish = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!title.trim() || !contentCid.trim() || !category.trim()) return;
-      publishAnnouncement.mutate([entityId, title.trim(), contentCid.trim(), category.trim(), expiresAt ? Number(expiresAt) : null]);
+      if (!title.trim() || !contentCid.trim()) return;
+      publishAnnouncement.mutate([
+        entityId,
+        category,
+        title.trim(),
+        contentCid.trim(),
+        expiresAt.trim() ? Number(expiresAt) : null,
+      ]);
       setTitle('');
       setContentCid('');
-      setCategory('');
+      setCategory(ANNOUNCEMENT_CATEGORIES[0]);
       setExpiresAt('');
     },
-    [entityId, title, contentCid, category, expiresAt, publishAnnouncement],
+    [category, contentCid, entityId, expiresAt, publishAnnouncement, title],
   );
 
   const handleUpdate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (editId === null || !editTitle.trim() || !editCid.trim()) return;
-      updateAnnouncement.mutate([entityId, editId, editTitle.trim(), editCid.trim()]);
+      if (editId === null) return;
+      updateAnnouncement.mutate([
+        editId,
+        editTitle.trim() || null,
+        editCid.trim() || null,
+        editCategory || null,
+        editExpiresAt.trim() ? Number(editExpiresAt) : null,
+      ]);
       setEditId(null);
+      setEditTitle('');
+      setEditCid('');
+      setEditCategory('');
+      setEditExpiresAt('');
     },
-    [entityId, editId, editTitle, editCid, updateAnnouncement],
+    [editCategory, editCid, editExpiresAt, editId, editTitle, updateAnnouncement],
   );
 
-  const sorted = [...announcements].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  const sorted = [...announcements].sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
 
   return (
     <Card>
@@ -549,19 +586,28 @@ function AnnouncementSection() {
         <form onSubmit={handlePublish} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="ann-title">{t('announcementTitle')}</Label>
+              <LabelWithTip htmlFor="ann-title" tip={t('help.announcementTitle')}>{t('announcementTitle')}</LabelWithTip>
               <Input id="ann-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('announcementTitle')} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ann-cid">{t('contentCid')}</Label>
+              <LabelWithTip htmlFor="ann-cid" tip={t('help.contentCid')}>{t('contentCid')}</LabelWithTip>
               <Input id="ann-cid" value={contentCid} onChange={(e) => setContentCid(e.target.value)} placeholder={t('contentCid')} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ann-cat">{t('categoryLabel')}</Label>
-              <Input id="ann-cat" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('categoryLabel')} />
+              <LabelWithTip htmlFor="ann-cat" tip={t('help.categoryLabel')}>{t('categoryLabel')}</LabelWithTip>
+              <Select value={category} onValueChange={(value) => setCategory(value as (typeof ANNOUNCEMENT_CATEGORIES)[number])}>
+                <SelectTrigger id="ann-cat">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ANNOUNCEMENT_CATEGORIES.map((item) => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ann-exp">{t('expiresAtBlock')}</Label>
+              <LabelWithTip htmlFor="ann-exp" tip={t('help.expiresAtBlock')}>{t('expiresAtBlock')}</LabelWithTip>
               <Input id="ann-exp" type="number" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} placeholder={t('expiresAtBlock')} />
             </div>
           </div>
@@ -583,23 +629,29 @@ function AnnouncementSection() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {a.pinned && <Badge variant="warning" className="text-xs">{t('pinned')}</Badge>}
+                      {a.isPinned && <Badge variant="warning" className="text-xs">{t('pinned')}</Badge>}
                       <span className="text-sm font-medium">{a.title}</span>
                       <Badge variant="outline" className="text-xs">{a.category}</Badge>
                     </div>
                     <div className="flex gap-1">
                       <Button variant="outline" size="sm"
                         className="border-orange-500 text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950"
-                        onClick={() => pinAnnouncement.mutate([entityId, a.id])}
-                        disabled={isTxBusy(pinAnnouncement)}>
-                        {a.pinned ? t('unpin') : t('pin')}
+                        onClick={() => (a.isPinned ? unpinAnnouncement : pinAnnouncement).mutate([entityId, a.id])}
+                        disabled={isTxBusy(a.isPinned ? unpinAnnouncement : pinAnnouncement)}>
+                        {a.isPinned ? t('unpin') : t('pin')}
                       </Button>
                       <Button variant="secondary" size="sm"
-                        onClick={() => { setEditId(a.id); setEditTitle(a.title); setEditCid(a.contentCid); }}>
+                        onClick={() => {
+                          setEditId(a.id);
+                          setEditTitle(a.title);
+                          setEditCid(a.contentCid);
+                          setEditCategory(ANNOUNCEMENT_CATEGORIES.includes(a.category as AnnouncementCategory) ? (a.category as (typeof ANNOUNCEMENT_CATEGORIES)[number]) : '');
+                          setEditExpiresAt(a.expiresAt ? String(a.expiresAt) : '');
+                        }}>
                         {tc('edit')}
                       </Button>
                       <Button variant="destructive" size="sm"
-                        onClick={() => withdrawAnnouncement.mutate([entityId, a.id])}
+                        onClick={() => withdrawAnnouncement.mutate([a.id])}
                         disabled={isTxBusy(withdrawAnnouncement)}>
                         {t('withdrawAnnouncement')}
                       </Button>
@@ -623,12 +675,36 @@ function AnnouncementSection() {
               <h3 className="text-sm font-medium text-muted-foreground">{t('editAnnouncement', { id: editId })}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-ann-title">{t('titleLabel')}</Label>
+                  <LabelWithTip htmlFor="edit-ann-title" tip={t('help.titleLabel')}>{t('titleLabel')}</LabelWithTip>
                   <Input id="edit-ann-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('titleLabel')} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-ann-cid">{t('contentCid')}</Label>
+                  <LabelWithTip htmlFor="edit-ann-cid" tip={t('help.contentCid')}>{t('contentCid')}</LabelWithTip>
                   <Input id="edit-ann-cid" value={editCid} onChange={(e) => setEditCid(e.target.value)} placeholder={t('contentCid')} />
+                </div>
+                <div className="space-y-1.5">
+                  <LabelWithTip htmlFor="edit-ann-category" tip={t('help.categoryLabel')}>{t('categoryLabel')}</LabelWithTip>
+                  <Select value={editCategory || '__none__'} onValueChange={(value) => setEditCategory(value === '__none__' ? '' : value as (typeof ANNOUNCEMENT_CATEGORIES)[number])}>
+                    <SelectTrigger id="edit-ann-category">
+                      <SelectValue placeholder={t('categoryLabel')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">-</SelectItem>
+                      {ANNOUNCEMENT_CATEGORIES.map((item) => (
+                        <SelectItem key={item} value={item}>{item}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <LabelWithTip htmlFor="edit-ann-exp" tip={t('help.expiresAtBlock')}>{t('expiresAtBlock')}</LabelWithTip>
+                  <Input
+                    id="edit-ann-exp"
+                    type="number"
+                    value={editExpiresAt}
+                    onChange={(e) => setEditExpiresAt(e.target.value)}
+                    placeholder={t('expiresAtBlock')}
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -642,6 +718,7 @@ function AnnouncementSection() {
       </CardContent>
       <CardFooter className="gap-3">
         <TxStatusIndicator txState={pinAnnouncement.txState} />
+        <TxStatusIndicator txState={unpinAnnouncement.txState} />
         <TxStatusIndicator txState={withdrawAnnouncement.txState} />
       </CardFooter>
     </Card>

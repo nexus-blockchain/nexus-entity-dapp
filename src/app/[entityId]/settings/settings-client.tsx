@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
@@ -16,7 +16,7 @@ import type { ConfirmDialogConfig } from '@/lib/types/models';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
@@ -69,6 +69,16 @@ function EntityInfoSection() {
   const [metadataUri, setMetadataUri] = useState(entity?.metadataUri ?? '');
   const [contactCid, setContactCid] = useState(entity?.contactCid ?? '');
 
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(entity?.name ?? '');
+    setLogoCid(entity?.logoCid ?? '');
+    setDescriptionCid(entity?.descriptionCid ?? '');
+    setMetadataUri(entity?.metadataUri ?? '');
+    setContactCid(entity?.contactCid ?? '');
+  }, [entity]);
+
   const updateEntity = useEntityMutation('entityRegistry', 'updateEntity', {
     invalidateKeys: [['entity', entityId]],
   });
@@ -77,8 +87,13 @@ function EntityInfoSection() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const cid = await ipfsUpload.upload(file);
-      if (cid) setLogoCid(cid);
+      setUploadError(null);
+      try {
+        const cid = await ipfsUpload.upload(file);
+        if (cid) setLogoCid(cid);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Logo upload failed');
+      }
     },
     [ipfsUpload],
   );
@@ -87,8 +102,13 @@ function EntityInfoSection() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const cid = await ipfsUpload.upload(file);
-      if (cid) setDescriptionCid(cid);
+      setUploadError(null);
+      try {
+        const cid = await ipfsUpload.upload(file);
+        if (cid) setDescriptionCid(cid);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Description upload failed');
+      }
     },
     [ipfsUpload],
   );
@@ -97,8 +117,13 @@ function EntityInfoSection() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const cid = await ipfsUpload.upload(file);
-      if (cid) setContactCid(cid);
+      setUploadError(null);
+      try {
+        const cid = await ipfsUpload.upload(file);
+        if (cid) setContactCid(cid);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Contact upload failed');
+      }
     },
     [ipfsUpload],
   );
@@ -136,18 +161,19 @@ function EntityInfoSection() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="entity-name">{t('name')}</Label>
+            <LabelWithTip htmlFor="entity-name" tip={t('help.name')}>{t('name')}</LabelWithTip>
             <Input
               id="entity-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              maxLength={64}
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="logo-upload">{t('logo')}</Label>
+            <LabelWithTip htmlFor="logo-upload" tip={t('help.logo')}>{t('logo')}</LabelWithTip>
             <div className="flex items-center gap-3">
               <Input
                 id="logo-upload"
@@ -166,7 +192,7 @@ function EntityInfoSection() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="desc-upload">{t('description')}</Label>
+            <LabelWithTip htmlFor="desc-upload" tip={t('help.description')}>{t('description')}</LabelWithTip>
             <div className="flex items-center gap-3">
               <Input
                 id="desc-upload"
@@ -181,7 +207,7 @@ function EntityInfoSection() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="metadata-uri">{t('metadataUri')}</Label>
+            <LabelWithTip htmlFor="metadata-uri" tip={t('help.metadataUri')}>{t('metadataUri')}</LabelWithTip>
             <Input
               id="metadata-uri"
               type="text"
@@ -192,7 +218,7 @@ function EntityInfoSection() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="contact-upload">{t('contact')}</Label>
+            <LabelWithTip htmlFor="contact-upload" tip={t('help.contact')}>{t('contact')}</LabelWithTip>
             <div className="flex items-center gap-3">
               <Input
                 id="contact-upload"
@@ -205,6 +231,10 @@ function EntityInfoSection() {
               <p className="text-xs text-muted-foreground break-all">CID: {contactCid}</p>
             )}
           </div>
+
+          {uploadError && (
+            <p className="text-sm text-destructive">{uploadError}</p>
+          )}
 
           <div className="flex items-center gap-3 pt-2">
             <Button type="submit" disabled={isBusy}>
@@ -282,7 +312,7 @@ function AdminManagementSection() {
           <h3 className="text-sm font-semibold">{t('addAdmin')}</h3>
 
           <div className="space-y-2">
-            <Label htmlFor="admin-address">{t('walletAddress')}</Label>
+            <LabelWithTip htmlFor="admin-address" tip={t('help.walletAddress')}>{t('walletAddress')}</LabelWithTip>
             <Input
               id="admin-address"
               type="text"
@@ -294,7 +324,7 @@ function AdminManagementSection() {
           </div>
 
           <div className="space-y-2">
-            <Label>{t('permissions')}</Label>
+            <LabelWithTip tip={t('help.permissions')}>{t('permissions')}</LabelWithTip>
             <div className="flex flex-wrap gap-2">
               {PERMISSION_OPTIONS.map((opt) => {
                 const checked = (selectedPermissions & opt.value) === opt.value;
@@ -340,7 +370,7 @@ function AdminManagementSection() {
           <h3 className="text-sm font-semibold">{t('removeAdmin')}</h3>
 
           <div className="space-y-2">
-            <Label htmlFor="remove-admin-address">{t('walletAddress')}</Label>
+            <LabelWithTip htmlFor="remove-admin-address" tip={t('help.walletAddress')}>{t('walletAddress')}</LabelWithTip>
             <Input
               id="remove-admin-address"
               type="text"
@@ -417,7 +447,7 @@ function FundManagementSection() {
           <h3 className="text-sm font-semibold">{t('topUp')}</h3>
 
           <div className="space-y-2">
-            <Label htmlFor="topup-amount">{t('topUpAmount')}</Label>
+            <LabelWithTip htmlFor="topup-amount" tip={t('help.topUpAmount')}>{t('topUpAmount')}</LabelWithTip>
             <Input
               id="topup-amount"
               type="text"
@@ -579,7 +609,7 @@ function LifecycleSection() {
           <p className="text-xs text-muted-foreground">{t('bindReferrerDesc')}</p>
 
           <div className="space-y-2">
-            <Label htmlFor="referrer-address">{t('referrerAddress')}</Label>
+            <LabelWithTip htmlFor="referrer-address" tip={t('help.referrerAddress')}>{t('referrerAddress')}</LabelWithTip>
             <Input
               id="referrer-address"
               type="text"
@@ -609,7 +639,7 @@ function LifecycleSection() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>{t('newType')}</Label>
+              <LabelWithTip tip={t('help.newType')}>{t('newType')}</LabelWithTip>
               <Select
                 value={newEntityType}
                 onValueChange={(val) => setNewEntityType(val as EntityType)}
@@ -628,7 +658,7 @@ function LifecycleSection() {
             </div>
 
             <div className="space-y-2">
-              <Label>{t('newGovernanceMode')}</Label>
+              <LabelWithTip tip={t('help.newGovernanceMode')}>{t('newGovernanceMode')}</LabelWithTip>
               <Select
                 value={newGovernanceMode}
                 onValueChange={(val) => setNewGovernanceMode(val as GovernanceMode)}
@@ -665,7 +695,7 @@ function LifecycleSection() {
               <p className="text-xs text-destructive/80">{t('transferOwnershipWarning')}</p>
 
               <div className="space-y-2">
-                <Label htmlFor="new-owner-address">{t('newOwnerAddress')}</Label>
+                <LabelWithTip htmlFor="new-owner-address" tip={t('help.newOwnerAddress')}>{t('newOwnerAddress')}</LabelWithTip>
                 <Input
                   id="new-owner-address"
                   type="text"

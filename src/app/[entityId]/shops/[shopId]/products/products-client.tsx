@@ -21,6 +21,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -145,6 +146,7 @@ function ProductsLoadingSkeleton() {
 
 function IpfsUploadField({
   label,
+  tip,
   value,
   onChange,
   accept,
@@ -152,6 +154,7 @@ function IpfsUploadField({
   id,
 }: {
   label: string;
+  tip?: string;
   value: string;
   onChange: (cid: string) => void;
   accept?: string;
@@ -183,7 +186,7 @@ function IpfsUploadField({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
+      <LabelWithTip htmlFor={id} tip={tip}>{label}</LabelWithTip>
       {accept ? (
         <Input
           id={id}
@@ -217,35 +220,35 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
   const te = useTranslations('enums');
   const badgeCfg = STATUS_BADGE_VARIANT[product.status];
   const { isReadOnly, isSuspended } = useEntityContext();
-  const { listProduct, delistProduct } = useProducts(shopId);
+  const { publishProduct, unpublishProduct } = useProducts(shopId);
   const validTransitions = getValidProductTransitions(product.status);
   const canAct = !isReadOnly && !isSuspended;
 
   const handleTransition = useCallback(
     (target: ProductStatus) => {
       if (target === ProductStatus.OnSale) {
-        listProduct.mutate([product.id]);
+        publishProduct.mutate([product.id]);
       } else if (target === ProductStatus.OffShelf) {
-        delistProduct.mutate([product.id]);
+        unpublishProduct.mutate([product.id]);
       }
     },
-    [product.id, listProduct, delistProduct],
+    [product.id, publishProduct, unpublishProduct],
   );
 
   // Compute realtime approx NEX from USDT price + exchange rate
   const approxNex = useMemo(() => {
-    if (product.priceUsdt <= 0 || !nexPerUsdt) return null;
-    // priceUsdt is stored as u64 with 10^6 precision
+    if (product.usdtPrice <= 0 || !nexPerUsdt) return null;
+    // usdtPrice is stored as u64 with 10^6 precision
     // nexPerUsdt is "1 USDT = X NEX" with 10^12 precision
-    // approxNex = priceUsdt * nexPerUsdt / 10^6
-    const raw = BigInt(product.priceUsdt) * nexPerUsdt / BigInt(1_000_000);
+    // approxNex = usdtPrice * nexPerUsdt / 10^6
+    const raw = BigInt(product.usdtPrice) * nexPerUsdt / BigInt(1_000_000);
     return raw;
-  }, [product.priceUsdt, nexPerUsdt]);
+  }, [product.usdtPrice, nexPerUsdt]);
 
   return (
     <Card className="overflow-hidden">
       <div className="aspect-square overflow-hidden">
-        <IpfsImage cid={product.imageCid} alt={t('products.productImage')} className="h-full w-full" />
+        <IpfsImage cid={product.imagesCid} alt={t('products.productImage')} className="h-full w-full" />
       </div>
       <CardHeader className="pb-2 pt-4">
         <div className="flex items-start justify-between">
@@ -256,18 +259,18 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
         </div>
       </CardHeader>
       <CardContent className="space-y-2 pb-2">
-        {product.priceUsdt > 0 ? (
+        {product.usdtPrice > 0 ? (
           <>
-            <p className="text-sm font-semibold">${formatUsdtPrice(product.priceUsdt)} USDT</p>
-            <p className="text-xs text-muted-foreground">
-              {approxNex
-                ? t('products.approxNex', { amount: formatNexBalance(approxNex) })
-                : t('products.approxNex', { amount: formatNexBalance(product.priceNex) })}
-            </p>
+            <p className="text-sm font-semibold">${formatUsdtPrice(product.usdtPrice)} USDT</p>
+            {approxNex && (
+              <p className="text-xs text-muted-foreground">
+                {t('products.approxNex', { amount: formatNexBalance(approxNex) })}
+              </p>
+            )}
           </>
         ) : (
           <p className="text-sm font-semibold">
-            {formatNexBalance(product.priceNex)} NEX
+            {formatNexBalance(product.price)} NEX
           </p>
         )}
         <div className="flex flex-wrap gap-1">
@@ -286,9 +289,9 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
             {product.stock === 0 ? t('products.stockUnlimited') : t('products.stockDisplay', { count: product.stock })}
           </Badge>
         </div>
-        {(product.minQuantity > 1 || product.maxQuantity > 0) && (
+        {(product.minOrderQuantity > 1 || product.maxOrderQuantity > 0) && (
           <p className="text-xs text-muted-foreground">
-            {t('products.purchaseRange', { min: product.minQuantity, max: product.maxQuantity > 0 ? ` ~ ${product.maxQuantity}` : '+' })}
+            {t('products.purchaseRange', { min: product.minOrderQuantity, max: product.maxOrderQuantity > 0 ? ` ~ ${product.maxOrderQuantity}` : '+' })}
           </p>
         )}
       </CardContent>
@@ -390,43 +393,26 @@ function CreateProductForm({ shopId }: { shopId: number }) {
         return;
       }
 
-      let rawNex: bigint;
-
-      if (usdtNum > 0 && nexPerUsdt) {
-        // USDT > 0 + rate available → auto-calculate NEX
-        const usdtMicro = Math.round(usdtNum * 1_000_000);
-        rawNex = BigInt(usdtMicro) * nexPerUsdt / BigInt(1_000_000);
-      } else {
-        // Manual NEX input (USDT=0 or rate unavailable)
-        const nexParts = form.priceNex.split('.');
-        const nexWhole = nexParts[0] ?? '0';
-        const nexFrac = (nexParts[1] ?? '').padEnd(12, '0').slice(0, 12);
-        rawNex = BigInt(nexWhole) * BigInt('1000000000000') + BigInt(nexFrac);
-      }
-
       // Convert USDT price to u64 (10^6 precision)
       const usdtVal = Math.round(usdtNum * 1_000_000);
-
-      const levelGate = form.visibility === ProductVisibility.LevelGated && form.levelGate
-        ? Number(form.levelGate)
-        : null;
 
       createProduct.mutate([
         shopId,
         form.nameCid,
         form.imageCid,
         form.detailCid,
-        rawNex.toString(),
         usdtVal,
         Number(form.stock),
         form.category,
-        form.visibility,
-        levelGate,
+        0, // sortWeight
+        '', // tagsCid (required Vec<u8>)
+        '', // skuCid (required Vec<u8>)
         Number(form.minQuantity),
         Number(form.maxQuantity),
+        form.visibility,
       ]);
     },
-    [form, shopId, createProduct, nexAutoCalc, nexPerUsdt, usdtNum],
+    [form, shopId, createProduct, nexAutoCalc, usdtNum],
   );
 
   return (
@@ -440,6 +426,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           <IpfsUploadField
             id="product-name"
             label={t('products.productName')}
+            tip={t('help.productName')}
             value={form.nameCid}
             onChange={(cid) => setField('nameCid', cid)}
             error={errors.nameCid}
@@ -447,6 +434,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           <IpfsUploadField
             id="product-image"
             label={t('products.productImage')}
+            tip={t('help.productImage')}
             value={form.imageCid}
             onChange={(cid) => setField('imageCid', cid)}
             accept="image/*"
@@ -455,6 +443,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           <IpfsUploadField
             id="product-detail"
             label={t('products.productDetail')}
+            tip={t('help.productDetail')}
             value={form.detailCid}
             onChange={(cid) => setField('detailCid', cid)}
             error={errors.detailCid}
@@ -463,7 +452,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           {/* Pricing — USDT primary, NEX auto-calculated or manual */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="price-usdt">{t('products.usdtPrice')}</Label>
+              <LabelWithTip htmlFor="price-usdt" tip={t('help.usdtPrice')}>{t('products.usdtPrice')}</LabelWithTip>
               <Input
                 id="price-usdt"
                 type="text"
@@ -515,7 +504,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           {/* Stock & Category */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="space-y-2">
-              <Label htmlFor="stock">{t('products.stock')}</Label>
+              <LabelWithTip htmlFor="stock" tip={t('help.stock')}>{t('products.stock')}</LabelWithTip>
               <Input
                 id="stock"
                 type="number"
@@ -526,7 +515,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
               {errors.stock && <p className="text-xs text-destructive">{errors.stock}</p>}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="category">{t('products.category')}</Label>
+              <LabelWithTip htmlFor="category" tip={t('help.category')}>{t('products.category')}</LabelWithTip>
               <Select value={form.category} onValueChange={(v) => setField('category', v)}>
                 <SelectTrigger id="category">
                   <SelectValue placeholder={t('products.category')} />
@@ -539,7 +528,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="visibility">{t('products.visibility')}</Label>
+              <LabelWithTip htmlFor="visibility" tip={t('help.visibility')}>{t('products.visibility')}</LabelWithTip>
               <Select value={form.visibility} onValueChange={(v) => setField('visibility', v)}>
                 <SelectTrigger id="visibility">
                   <SelectValue placeholder={t('products.visibility')} />
@@ -556,7 +545,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           {/* Level gate (only when LevelGated) */}
           {form.visibility === ProductVisibility.LevelGated && (
             <div className="space-y-2">
-              <Label htmlFor="level-gate">{t('products.levelGate')}</Label>
+              <LabelWithTip htmlFor="level-gate" tip={t('help.levelGate')}>{t('products.levelGate')}</LabelWithTip>
               <Input
                 id="level-gate"
                 type="number"
@@ -571,7 +560,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
           {/* Purchase quantity */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="min-qty">{t('products.minQuantity')}</Label>
+              <LabelWithTip htmlFor="min-qty" tip={t('help.minQuantity')}>{t('products.minQuantity')}</LabelWithTip>
               <Input
                 id="min-qty"
                 type="number"
@@ -582,7 +571,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
               {errors.minQuantity && <p className="text-xs text-destructive">{errors.minQuantity}</p>}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="max-qty">{t('products.maxQuantity')}</Label>
+              <LabelWithTip htmlFor="max-qty" tip={t('help.maxQuantity')}>{t('products.maxQuantity')}</LabelWithTip>
               <Input
                 id="max-qty"
                 type="number"

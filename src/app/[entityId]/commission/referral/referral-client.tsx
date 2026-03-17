@@ -8,12 +8,13 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useReferralCommission } from '@/hooks/use-referral-commission';
 import { useWalletStore } from '@/stores/wallet-store';
-
 import { useTranslations } from 'next-intl';
+import { formatNex } from '@/lib/utils/format';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -50,19 +51,18 @@ function ReferralSkeleton() {
   );
 }
 
-// ─── Config Section ─────────────────────────────────────────
+// ─── Config Section (Direct Reward) ─────────────────────────
 
 function ConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
-  const { config, setDirectRewardConfig, pauseReferral, resumeReferral } = useReferralCommission();
+  const { config, setDirectRewardConfig } = useReferralCommission();
 
   const [rewardRate, setRewardRateVal] = useState('');
 
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      // setDirectRewardConfig(entityId:u64, rate:u16)
       setDirectRewardConfig.mutate([
         entityId,
         Number(rewardRate) || config?.rewardRate || 0,
@@ -72,25 +72,23 @@ function ConfigSection() {
   );
 
   const handleToggle = useCallback(() => {
+    // Use setDirectRewardConfig to toggle enable/disable
+    // When enabling, use current rewardRate or form value
+    // When disabling, set rate to 0 to effectively disable
     if (config?.enabled) {
-      pauseReferral.mutate([entityId]);
-    } else if (config) {
-      resumeReferral.mutate([entityId]);
+      // Disable by setting rate to 0
+      setDirectRewardConfig.mutate([entityId, 0]);
     } else {
-      // setDirectRewardConfig(entityId:u64, rate:u16)
+      // Enable with current or default rate
       setDirectRewardConfig.mutate([
         entityId,
-        Number(rewardRate) || 0,
+        Number(rewardRate) || config?.rewardRate || 0,
       ]);
     }
-  }, [entityId, config, rewardRate, pauseReferral, resumeReferral, setDirectRewardConfig]);
+  }, [entityId, config, rewardRate, setDirectRewardConfig]);
 
-  const isToggleBusy = isTxBusy(pauseReferral) || isTxBusy(resumeReferral) || isTxBusy(setDirectRewardConfig);
-  const toggleTxState = config?.enabled
-    ? pauseReferral.txState
-    : config
-      ? resumeReferral.txState
-      : setDirectRewardConfig.txState;
+  const isToggleBusy = isTxBusy(setDirectRewardConfig);
+  const toggleTxState = setDirectRewardConfig.txState;
 
   return (
     <Card>
@@ -129,7 +127,7 @@ function ConfigSection() {
 
           <form onSubmit={handleSaveConfig} className="space-y-4">
             <div className="space-y-2 max-w-xs">
-              <Label htmlFor="ref-reward-rate">{t('rewardRate')}</Label>
+              <LabelWithTip htmlFor="ref-reward-rate" tip={t('help.rewardRate')}>{t('rewardRate')}</LabelWithTip>
               <Input
                 id="ref-reward-rate"
                 type="number"
@@ -147,6 +145,456 @@ function ConfigSection() {
             </div>
           </form>
         </PermissionGuard>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Fixed Amount Config Section ────────────────────────────
+
+function FixedAmountConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { setFixedAmountConfig } = useReferralCommission();
+
+  const [fixedAmount, setFixedAmount] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!fixedAmount.trim()) return;
+      setFixedAmountConfig.mutate([entityId, fixedAmount]);
+    },
+    [entityId, fixedAmount, setFixedAmountConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('fixedAmountConfig')}</CardTitle>
+        <CardDescription>{t('fixedAmountConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2 max-w-xs">
+            <LabelWithTip htmlFor="ref-fixed-amount" tip={t('help.fixedAmount')}>{t('fixedAmount')}</LabelWithTip>
+            <Input
+              id="ref-fixed-amount"
+              type="text"
+              inputMode="numeric"
+              value={fixedAmount}
+              onChange={(e) => setFixedAmount(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setFixedAmountConfig)}>
+              {t('setFixedAmountConfig')}
+            </Button>
+            <TxStatusIndicator txState={setFixedAmountConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── First Order Config Section ─────────────────────────────
+
+function FirstOrderConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { setFirstOrderConfig } = useReferralCommission();
+
+  const [amount, setAmount] = useState('');
+  const [rate, setRate] = useState('');
+  const [useAmount, setUseAmount] = useState(false);
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setFirstOrderConfig.mutate([
+        entityId,
+        amount.trim() || '0',
+        Number(rate) || 0,
+        useAmount,
+      ]);
+    },
+    [entityId, amount, rate, useAmount, setFirstOrderConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('firstOrderConfig')}</CardTitle>
+        <CardDescription>{t('firstOrderConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-first-order-amount" tip={t('help.firstOrderAmount')}>{t('firstOrderAmount')}</LabelWithTip>
+              <Input
+                id="ref-first-order-amount"
+                type="text"
+                inputMode="numeric"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-first-order-rate" tip={t('help.firstOrderRate')}>{t('firstOrderRate')}</LabelWithTip>
+              <Input
+                id="ref-first-order-rate"
+                type="number"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={useAmount}
+              onCheckedChange={setUseAmount}
+            />
+            <Label>{t('useAmount')}</Label>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setFirstOrderConfig)}>
+              {t('setFirstOrderConfig')}
+            </Button>
+            <TxStatusIndicator txState={setFirstOrderConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Repeat Purchase Config Section ─────────────────────────
+
+function RepeatPurchaseConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { setRepeatPurchaseConfig } = useReferralCommission();
+
+  const [rate, setRate] = useState('');
+  const [minOrders, setMinOrders] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setRepeatPurchaseConfig.mutate([
+        entityId,
+        Number(rate) || 0,
+        Number(minOrders) || 0,
+      ]);
+    },
+    [entityId, rate, minOrders, setRepeatPurchaseConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('repeatPurchaseConfig')}</CardTitle>
+        <CardDescription>{t('repeatPurchaseConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-repeat-rate" tip={t('help.repeatRate')}>{t('repeatRate')}</LabelWithTip>
+              <Input
+                id="ref-repeat-rate"
+                type="number"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-min-orders" tip={t('help.minOrders')}>{t('minOrders')}</LabelWithTip>
+              <Input
+                id="ref-min-orders"
+                type="number"
+                value={minOrders}
+                onChange={(e) => setMinOrders(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setRepeatPurchaseConfig)}>
+              {t('setRepeatPurchaseConfig')}
+            </Button>
+            <TxStatusIndicator txState={setRepeatPurchaseConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Referrer Guard Config Section ──────────────────────────
+
+function ReferrerGuardConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { guardConfig, setReferrerGuardConfig } = useReferralCommission();
+
+  const [minSpent, setMinSpent] = useState('');
+  const [minOrders, setMinOrders] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setReferrerGuardConfig.mutate([
+        entityId,
+        minSpent.trim() || '0',
+        Number(minOrders) || 0,
+      ]);
+    },
+    [entityId, minSpent, minOrders, setReferrerGuardConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('referrerGuardConfig')}</CardTitle>
+        <CardDescription>{t('referrerGuardConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('minReferrerSpent')}</p>
+            <p className="text-sm font-medium">{formatNex(guardConfig?.minReferrerSpent ?? BigInt(0))} NEX</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('minReferrerOrders')}</p>
+            <p className="text-sm font-medium">{guardConfig?.minReferrerOrders ?? 0}</p>
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-guard-min-spent" tip={t('help.minReferrerSpent')}>{t('minReferrerSpent')}</LabelWithTip>
+              <Input
+                id="ref-guard-min-spent"
+                type="text"
+                inputMode="numeric"
+                value={minSpent}
+                onChange={(e) => setMinSpent(e.target.value)}
+                placeholder={guardConfig?.minReferrerSpent?.toString() ?? '0'}
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-guard-min-orders" tip={t('help.minReferrerOrders')}>{t('minReferrerOrders')}</LabelWithTip>
+              <Input
+                id="ref-guard-min-orders"
+                type="number"
+                value={minOrders}
+                onChange={(e) => setMinOrders(e.target.value)}
+                placeholder={String(guardConfig?.minReferrerOrders ?? 0)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setReferrerGuardConfig)}>
+              {t('setReferrerGuardConfig')}
+            </Button>
+            <TxStatusIndicator txState={setReferrerGuardConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Commission Cap Config Section ──────────────────────────
+
+function CommissionCapConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { capConfig, setCommissionCapConfig } = useReferralCommission();
+
+  const [maxPerOrder, setMaxPerOrder] = useState('');
+  const [maxTotalEarned, setMaxTotalEarned] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setCommissionCapConfig.mutate([
+        entityId,
+        maxPerOrder.trim() || '0',
+        maxTotalEarned.trim() || '0',
+      ]);
+    },
+    [entityId, maxPerOrder, maxTotalEarned, setCommissionCapConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('commissionCapConfig')}</CardTitle>
+        <CardDescription>{t('commissionCapConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('maxPerOrder')}</p>
+            <p className="text-sm font-medium">{formatNex(capConfig?.maxPerOrder ?? BigInt(0))} NEX</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('maxTotalEarned')}</p>
+            <p className="text-sm font-medium">{formatNex(capConfig?.maxTotalEarned ?? BigInt(0))} NEX</p>
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-cap-max-per-order" tip={t('help.maxPerOrder')}>{t('maxPerOrder')}</LabelWithTip>
+              <Input
+                id="ref-cap-max-per-order"
+                type="text"
+                inputMode="numeric"
+                value={maxPerOrder}
+                onChange={(e) => setMaxPerOrder(e.target.value)}
+                placeholder={capConfig?.maxPerOrder?.toString() ?? '0'}
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-cap-max-total-earned" tip={t('help.maxTotalEarned')}>{t('maxTotalEarned')}</LabelWithTip>
+              <Input
+                id="ref-cap-max-total-earned"
+                type="text"
+                inputMode="numeric"
+                value={maxTotalEarned}
+                onChange={(e) => setMaxTotalEarned(e.target.value)}
+                placeholder={capConfig?.maxTotalEarned?.toString() ?? '0'}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setCommissionCapConfig)}>
+              {t('setCommissionCapConfig')}
+            </Button>
+            <TxStatusIndicator txState={setCommissionCapConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Referral Validity Config Section ───────────────────────
+
+function ReferralValidityConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { validityConfig, setReferralValidityConfig } = useReferralCommission();
+
+  const [validityBlocks, setValidityBlocks] = useState('');
+  const [validOrders, setValidOrders] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setReferralValidityConfig.mutate([
+        entityId,
+        Number(validityBlocks) || 0,
+        Number(validOrders) || 0,
+      ]);
+    },
+    [entityId, validityBlocks, validOrders, setReferralValidityConfig],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('referralValidityConfig')}</CardTitle>
+        <CardDescription>{t('referralValidityConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('validityBlocks')}</p>
+            <p className="text-sm font-medium">{validityConfig?.validityBlocks ?? 0}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t('validOrders')}</p>
+            <p className="text-sm font-medium">{validityConfig?.validOrders ?? 0}</p>
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-validity-blocks" tip={t('help.validityBlocks')}>{t('validityBlocks')}</LabelWithTip>
+              <Input
+                id="ref-validity-blocks"
+                type="number"
+                value={validityBlocks}
+                onChange={(e) => setValidityBlocks(e.target.value)}
+                placeholder={String(validityConfig?.validityBlocks ?? 0)}
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="ref-valid-orders" tip={t('help.validOrders')}>{t('validOrders')}</LabelWithTip>
+              <Input
+                id="ref-valid-orders"
+                type="number"
+                value={validOrders}
+                onChange={(e) => setValidOrders(e.target.value)}
+                placeholder={String(validityConfig?.validOrders ?? 0)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setReferralValidityConfig)}>
+              {t('setReferralValidityConfig')}
+            </Button>
+            <TxStatusIndicator txState={setReferralValidityConfig.txState} />
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Clear Config Section ───────────────────────────────────
+
+function ClearConfigSection() {
+  const t = useTranslations('referral');
+  const { entityId } = useEntityContext();
+  const { clearReferralConfig } = useReferralCommission();
+
+  const handleClear = useCallback(() => {
+    clearReferralConfig.mutate([entityId]);
+  }, [entityId, clearReferralConfig]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('clearConfig')}</CardTitle>
+        <CardDescription>{t('clearConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-3">
+          <Button variant="destructive" onClick={handleClear} disabled={isTxBusy(clearReferralConfig)}>
+            {t('clearConfig')}
+          </Button>
+          <TxStatusIndicator txState={clearReferralConfig.txState} />
+        </div>
       </CardContent>
     </Card>
   );
@@ -175,7 +623,7 @@ function StatsSection() {
           <Card className="shadow-none">
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">{t('totalRewardDistributed')}</p>
-              <p className="text-lg font-semibold">{stats?.totalRewardDistributed?.toString() ?? '0'}</p>
+              <p className="text-lg font-semibold">{formatNex(stats?.totalRewardDistributed ?? BigInt(0))} NEX</p>
             </CardContent>
           </Card>
           <Card className="shadow-none">
@@ -234,7 +682,7 @@ function MyReferralSection() {
           <Card className="shadow-none">
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">{t('myTotalEarned')}</p>
-              <p className="text-lg font-semibold">{record?.totalEarned?.toString() ?? '0'}</p>
+              <p className="text-lg font-semibold">{formatNex(record?.totalEarned ?? BigInt(0))} NEX</p>
             </CardContent>
           </Card>
         </div>
@@ -276,6 +724,19 @@ export function ReferralPage() {
       </div>
 
       <ConfigSection />
+
+      <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+        <div className="space-y-6">
+          <FixedAmountConfigSection />
+          <FirstOrderConfigSection />
+          <RepeatPurchaseConfigSection />
+          <ReferrerGuardConfigSection />
+          <CommissionCapConfigSection />
+          <ReferralValidityConfigSection />
+          <ClearConfigSection />
+        </div>
+      </PermissionGuard>
+
       <StatsSection />
       <MyReferralSection />
     </div>

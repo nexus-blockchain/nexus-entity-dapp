@@ -11,20 +11,17 @@ import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils/cn';
+import { CopyableAddress } from '@/components/copyable-address';
+import { LabelWithTip } from '@/components/field-help-tip';
 
 // ─── Helpers ────────────────────────────────────────────────
 
 function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
-
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-6)}` : addr;
 }
 
 function StarDisplay({ rating }: { rating: number }) {
@@ -161,16 +158,16 @@ function SubmitReviewForm() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="review-order">{t('orderId')}</Label>
+          <LabelWithTip htmlFor="review-order" tip={t('help.orderId')}>{t('orderId')}</LabelWithTip>
           <Input id="review-order" type="number" value={orderId} onChange={(e) => setOrderId(e.target.value)}
             placeholder={t('orderIdPlaceholder')} />
         </div>
         <div className="space-y-1.5">
-          <Label>{t('rating')}</Label>
+          <LabelWithTip tip={t('help.rating')}>{t('rating')}</LabelWithTip>
           <StarSelector value={rating} onChange={setRating} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="review-cid">{t('contentCid')}</Label>
+          <LabelWithTip htmlFor="review-cid" tip={t('help.contentCid')}>{t('contentCid')}</LabelWithTip>
           <Input id="review-cid" value={contentCid} onChange={(e) => setContentCid(e.target.value)}
             placeholder={t('contentCidPlaceholder')} />
         </div>
@@ -209,7 +206,7 @@ function ReviewListSection() {
                       <StarDisplay rating={r.rating} />
                     </div>
                     <Badge variant="outline" className="font-mono text-xs">
-                      {shortAddr(r.reviewer)}
+                      <CopyableAddress address={r.reviewer} textClassName="text-xs" hideCopyIcon />
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">CID: {r.contentCid}</p>

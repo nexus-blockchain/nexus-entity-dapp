@@ -13,10 +13,11 @@ import { cn } from '@/lib/utils/cn';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -28,6 +29,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { CopyableAddress } from '@/components/copyable-address';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -35,8 +37,10 @@ function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
 }
 
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-6)}` : addr;
+function encodeCountryCode(value: string): [number, number] | null {
+  const normalized = value.trim().toUpperCase();
+  if (normalized.length !== 2) return null;
+  return [normalized.charCodeAt(0), normalized.charCodeAt(1)];
 }
 
 const KYC_LEVEL_KEY: Record<number, string> = {
@@ -179,15 +183,25 @@ function RequirementSection() {
 
   const [editing, setEditing] = useState(false);
   const [minLevel, setMinLevel] = useState<KycLevel>(requirement.minLevel);
+  const [mandatory, setMandatory] = useState(requirement.mandatory);
+  const [gracePeriod, setGracePeriod] = useState(requirement.gracePeriod);
+  const [allowHighRiskCountries, setAllowHighRiskCountries] = useState(requirement.allowHighRiskCountries);
   const [maxRiskScore, setMaxRiskScore] = useState(requirement.maxRiskScore);
 
   const handleSave = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      setEntityRequirement.mutate([entityId, minLevel, maxRiskScore]);
+      setEntityRequirement.mutate([
+        entityId,
+        minLevel,
+        mandatory,
+        gracePeriod,
+        allowHighRiskCountries,
+        maxRiskScore,
+      ]);
       setEditing(false);
     },
-    [entityId, minLevel, maxRiskScore, setEntityRequirement],
+    [allowHighRiskCountries, entityId, gracePeriod, mandatory, maxRiskScore, minLevel, setEntityRequirement],
   );
 
   return (
@@ -204,6 +218,9 @@ function RequirementSection() {
               size="sm"
               onClick={() => {
                 setMinLevel(requirement.minLevel);
+                setMandatory(requirement.mandatory);
+                setGracePeriod(requirement.gracePeriod);
+                setAllowHighRiskCountries(requirement.allowHighRiskCountries);
                 setMaxRiskScore(requirement.maxRiskScore);
                 setEditing(true);
               }}
@@ -217,9 +234,9 @@ function RequirementSection() {
       <CardContent>
         {editing ? (
           <form onSubmit={handleSave} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>{t('minLevel')}</Label>
+                <LabelWithTip tip={t('help.minLevel')}>{t('minLevel')}</LabelWithTip>
                 <Select
                   value={String(minLevel)}
                   onValueChange={(v) => setMinLevel(Number(v) as KycLevel)}
@@ -236,7 +253,7 @@ function RequirementSection() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="max-risk">{t('maxRiskScore')}</Label>
+                <LabelWithTip htmlFor="max-risk" tip={t('help.maxRiskScore')}>{t('maxRiskScore')}</LabelWithTip>
                 <Input
                   id="max-risk"
                   type="number"
@@ -244,6 +261,34 @@ function RequirementSection() {
                   max={100}
                   value={maxRiskScore}
                   onChange={(e) => setMaxRiskScore(Number(e.target.value))}
+                />
+              </div>
+              <div className="space-y-2">
+                <LabelWithTip htmlFor="grace-period" tip={t('help.gracePeriod')}>{t('gracePeriod')}</LabelWithTip>
+                <Input
+                  id="grace-period"
+                  type="number"
+                  min={0}
+                  value={gracePeriod}
+                  onChange={(e) => setGracePeriod(Number(e.target.value))}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <LabelWithTip htmlFor="mandatory-switch" tip={t('help.mandatory')}>{t('mandatory')}</LabelWithTip>
+                  <p className="text-xs text-muted-foreground">{t('requirementDesc')}</p>
+                </div>
+                <Switch id="mandatory-switch" checked={mandatory} onCheckedChange={setMandatory} />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <LabelWithTip htmlFor="high-risk-switch" tip={t('help.allowHighRiskCountries')}>{t('allowHighRiskCountries')}</LabelWithTip>
+                  <p className="text-xs text-muted-foreground">{t('maxRiskScore')}</p>
+                </div>
+                <Switch
+                  id="high-risk-switch"
+                  checked={allowHighRiskCountries}
+                  onCheckedChange={setAllowHighRiskCountries}
                 />
               </div>
             </div>
@@ -258,7 +303,7 @@ function RequirementSection() {
             </div>
           </form>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card className="shadow-none">
               <CardContent className="p-4">
                 <p className="text-xs text-muted-foreground">{t('minLevel')}</p>
@@ -271,6 +316,21 @@ function RequirementSection() {
               <CardContent className="p-4">
                 <p className="text-xs text-muted-foreground">{t('maxRiskScore')}</p>
                 <p className="text-sm font-medium">{requirement.maxRiskScore}</p>
+              </CardContent>
+            </Card>
+            <Card className="shadow-none">
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">{t('mandatory')}</p>
+                <p className="text-sm font-medium">{requirement.mandatory ? tc('enabled') : tc('disabled')}</p>
+              </CardContent>
+            </Card>
+            <Card className="shadow-none">
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">{t('gracePeriod')}</p>
+                <p className="text-sm font-medium">{requirement.gracePeriod}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t('allowHighRiskCountries')}: {requirement.allowHighRiskCountries ? tc('enabled') : tc('disabled')}
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -291,15 +351,18 @@ function ApplicationSection() {
   const [level, setLevel] = useState<KycLevel>(KycLevel.Basic);
   const [dataCid, setDataCid] = useState('');
   const [countryCode, setCountryCode] = useState('');
+  const isCountryCodeValid = !countryCode.trim() || countryCode.trim().length === 2;
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!dataCid.trim()) return;
-      const args: (string | number | null)[] = [entityId, level, dataCid.trim()];
-      if (countryCode.trim()) args.push(countryCode.trim());
-      else args.push(null);
-      submitKyc.mutate(args);
+      submitKyc.mutate([
+        entityId,
+        level,
+        dataCid.trim(),
+        encodeCountryCode(countryCode),
+      ]);
       setDataCid('');
       setCountryCode('');
     },
@@ -316,7 +379,7 @@ function ApplicationSection() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
-              <Label>{t('certificationLevel')}</Label>
+              <LabelWithTip tip={t('help.certificationLevel')}>{t('certificationLevel')}</LabelWithTip>
               <Select
                 value={String(level)}
                 onValueChange={(v) => setLevel(Number(v) as KycLevel)}
@@ -332,7 +395,7 @@ function ApplicationSection() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="data-cid">{t('dataCid')}</Label>
+              <LabelWithTip htmlFor="data-cid" tip={t('help.dataCid')}>{t('dataCid')}</LabelWithTip>
               <Input
                 id="data-cid"
                 value={dataCid}
@@ -341,20 +404,24 @@ function ApplicationSection() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="country-code">{t('countryCode')}</Label>
+              <LabelWithTip htmlFor="country-code" tip={t('help.countryCode')}>{t('countryCode')}</LabelWithTip>
               <Input
                 id="country-code"
                 value={countryCode}
                 onChange={(e) => setCountryCode(e.target.value)}
                 placeholder={t('countryCodePlaceholder')}
+                maxLength={2}
               />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={!dataCid.trim() || isTxBusy(submitKyc)}>
+            <Button type="submit" disabled={!dataCid.trim() || !isCountryCodeValid || isTxBusy(submitKyc)}>
               {t('submitApplication_btn')}
             </Button>
             <TxStatusIndicator txState={submitKyc.txState} />
+            {!isCountryCodeValid && (
+              <p className="text-xs text-destructive">{t('countryCodePlaceholder')}</p>
+            )}
           </div>
         </form>
       </CardContent>
@@ -373,12 +440,16 @@ function ManagementSection() {
 
   const [updateAccount, setUpdateAccount] = useState<string | null>(null);
   const [newCid, setNewCid] = useState('');
+  const [riskScores, setRiskScores] = useState<Record<string, string>>({});
+  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
+  const [rejectDetails, setRejectDetails] = useState<Record<string, string>>({});
+  const [revokeReasons, setRevokeReasons] = useState<Record<string, string>>({});
 
   const handleUpdate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!updateAccount || !newCid.trim()) return;
-      updateKycData.mutate([entityId, updateAccount, newCid.trim()]);
+      updateKycData.mutate([entityId, newCid.trim()]);
       setUpdateAccount(null);
       setNewCid('');
     },
@@ -409,7 +480,7 @@ function ManagementSection() {
             <TableBody>
               {kycRecords.map((r) => (
                 <TableRow key={r.account}>
-                  <TableCell className="font-mono text-xs">{shortAddr(r.account)}</TableCell>
+                  <TableCell><CopyableAddress address={r.account} textClassName="text-xs" /></TableCell>
                   <TableCell>
                     <Badge variant={KYC_STATUS_VARIANT[r.status]}>
                       {te(KYC_STATUS_KEY[r.status])}
@@ -418,62 +489,103 @@ function ManagementSection() {
                   <TableCell>
                     <Badge variant="outline">Lv.{r.level} {te(KYC_LEVEL_KEY[r.level] ?? 'kycLevel.None')}</Badge>
                   </TableCell>
-                  <TableCell>{r.riskScore}</TableCell>
+                  <TableCell>
+                    {r.status === KycStatus.Pending ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        className="w-24"
+                        value={riskScores[r.account] ?? String(r.riskScore ?? 0)}
+                        onChange={(e) => setRiskScores((prev) => ({ ...prev, [r.account]: e.target.value }))}
+                      />
+                    ) : (
+                      r.riskScore
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <div className="space-y-0.5">
-                      <div>CID: {r.dataCid ? shortAddr(r.dataCid) : '---'}</div>
+                      <div className="inline-flex items-center gap-1">CID: {r.dataCid ? <CopyableAddress address={r.dataCid} textClassName="text-xs" /> : '---'}</div>
                       {r.countryCode && <div>{t('country')}: {r.countryCode}</div>}
                       {r.expiresAt && <div>{t('expiresAt', { block: String(r.expiresAt) })}</div>}
                       <div>{t('submittedAt', { block: String(r.submittedAt) })}</div>
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex flex-wrap justify-end gap-1">
+                    <div className="flex flex-col items-end gap-2">
                       {r.status === KycStatus.Pending && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => approveKyc.mutate([entityId, r.account])}
-                            disabled={isTxBusy(approveKyc)}
-                          >
-                            {t('approveKyc')}
-                          </Button>
+                        <div className="space-y-2 rounded-md border p-2">
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Input
+                              value={rejectReasons[r.account] ?? ''}
+                              onChange={(e) => setRejectReasons((prev) => ({ ...prev, [r.account]: e.target.value }))}
+                              placeholder={t('rejectReason')}
+                            />
+                            <Input
+                              value={rejectDetails[r.account] ?? ''}
+                              onChange={(e) => setRejectDetails((prev) => ({ ...prev, [r.account]: e.target.value }))}
+                              placeholder={t('rejectDetailsCid')}
+                            />
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => approveKyc.mutate([
+                                entityId,
+                                r.account,
+                                Number(riskScores[r.account] ?? r.riskScore ?? 0),
+                              ])}
+                              disabled={isTxBusy(approveKyc)}
+                            >
+                              {t('approveKyc')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => rejectKyc.mutate([
+                                entityId,
+                                r.account,
+                                (rejectReasons[r.account] ?? '').trim(),
+                                (rejectDetails[r.account] ?? '').trim() || null,
+                              ])}
+                              disabled={isTxBusy(rejectKyc) || !(rejectReasons[r.account] ?? '').trim()}
+                            >
+                              {t('rejectKyc')}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {r.status === KycStatus.Approved && (
+                        <div className="space-y-2 rounded-md border p-2">
+                          <Input
+                            value={revokeReasons[r.account] ?? ''}
+                            onChange={(e) => setRevokeReasons((prev) => ({ ...prev, [r.account]: e.target.value }))}
+                            placeholder={t('revokeReason')}
+                          />
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => rejectKyc.mutate([entityId, r.account])}
-                            disabled={isTxBusy(rejectKyc)}
+                            onClick={() => revokeKyc.mutate([
+                              entityId,
+                              r.account,
+                              (revokeReasons[r.account] ?? '').trim(),
+                            ])}
+                            disabled={isTxBusy(revokeKyc) || !(revokeReasons[r.account] ?? '').trim()}
                           >
-                            {t('rejectKyc')}
+                            {t('revokeKyc')}
                           </Button>
-                        </>
+                        </div>
                       )}
-                      {r.status === KycStatus.Approved && (
+                      <div className="flex flex-wrap justify-end gap-1">
                         <Button
                           size="sm"
-                          variant="destructive"
-                          onClick={() => revokeKyc.mutate([entityId, r.account])}
-                          disabled={isTxBusy(revokeKyc)}
+                          variant="outline"
+                          onClick={() => { setUpdateAccount(r.account); setNewCid(''); }}
                         >
-                          {t('revokeKyc')}
+                          {t('updateData')}
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => { setUpdateAccount(r.account); setNewCid(''); }}
-                      >
-                        {t('updateData')}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => purgeKycData.mutate([entityId, r.account])}
-                        disabled={isTxBusy(purgeKycData)}
-                      >
-                        {t('purgeData')}
-                      </Button>
+                      </div>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -489,14 +601,14 @@ function ManagementSection() {
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>{t('updateKycData', { address: updateAccount ? shortAddr(updateAccount) : '' })}</DialogTitle>
+              <DialogTitle>{t('updateKycData', { address: updateAccount ?? '' })}</DialogTitle>
               <DialogDescription>
-                {t('updateKycDataDesc', { address: updateAccount ? shortAddr(updateAccount) : '' })}
+                {t('updateKycDataDesc', { address: updateAccount ?? '' })}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleUpdate} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="new-cid">{t('newDataCid')}</Label>
+                <LabelWithTip htmlFor="new-cid" tip={t('help.newDataCid')}>{t('newDataCid')}</LabelWithTip>
                 <Input
                   id="new-cid"
                   value={newCid}
@@ -518,6 +630,14 @@ function ManagementSection() {
         </Dialog>
       </CardContent>
       <CardFooter className="flex-wrap gap-3">
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => purgeKycData.mutate([entityId])}
+          disabled={isTxBusy(purgeKycData)}
+        >
+          {t('purgeEntityData')}
+        </Button>
         <TxStatusIndicator txState={approveKyc.txState} />
         <TxStatusIndicator txState={rejectKyc.txState} />
         <TxStatusIndicator txState={revokeKyc.txState} />
@@ -547,7 +667,7 @@ function UserKycSection() {
           <Card key={r.account} className="shadow-none">
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-sm">{shortAddr(r.account)}</span>
+                <CopyableAddress address={r.account} textClassName="text-xs" />
                 <Badge variant={KYC_STATUS_VARIANT[r.status]}>
                   {te(KYC_STATUS_KEY[r.status])}
                 </Badge>

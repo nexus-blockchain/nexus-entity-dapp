@@ -20,17 +20,20 @@ function parseProductData(raw: unknown): ProductData | null {
     id: Number(obj.id ?? 0),
     shopId: Number(obj.shopId ?? 0),
     nameCid: decodeChainString(obj.nameCid),
-    imageCid: decodeChainString(obj.imageCid),
+    imagesCid: decodeChainString(obj.imagesCid ?? obj.imageCid),
     detailCid: decodeChainString(obj.detailCid),
-    priceNex: BigInt(String(obj.priceNex ?? 0)),
-    priceUsdt: Number(obj.priceUsdt ?? 0),
+    price: BigInt(String(obj.price ?? obj.priceNex ?? 0)),
+    usdtPrice: Number(obj.usdtPrice ?? obj.priceUsdt ?? 0),
     stock: Number(obj.stock ?? 0),
     category: String(obj.category ?? 'Other') as ProductCategory,
     visibility: String(obj.visibility ?? 'Public') as ProductVisibility,
     levelGate: obj.levelGate != null ? Number(obj.levelGate) : null,
     status: String(obj.status ?? 'Draft') as ProductStatus,
-    minQuantity: Number(obj.minQuantity ?? 1),
-    maxQuantity: Number(obj.maxQuantity ?? 0),
+    sortWeight: Number(obj.sortWeight ?? obj.sort_weight ?? 0),
+    tagsCid: obj.tagsCid ? decodeChainString(obj.tagsCid) : null,
+    skuCid: obj.skuCid ? decodeChainString(obj.skuCid) : null,
+    minOrderQuantity: Number(obj.minOrderQuantity ?? obj.minQuantity ?? 1),
+    maxOrderQuantity: Number(obj.maxOrderQuantity ?? obj.maxQuantity ?? 0),
   };
 }
 
@@ -83,11 +86,11 @@ export function useProducts(shopId: number) {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'products']],
   });
 
-  const listProduct = useEntityMutation('entityProduct', 'listProduct', {
+  const publishProduct = useEntityMutation('entityProduct', 'publishProduct', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'products']],
   });
 
-  const delistProduct = useEntityMutation('entityProduct', 'delistProduct', {
+  const unpublishProduct = useEntityMutation('entityProduct', 'unpublishProduct', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'products']],
   });
 
@@ -97,7 +100,7 @@ export function useProducts(shopId: number) {
     error: productIdsQuery.error || productsQuery.error,
     createProduct,
     updateProduct,
-    listProduct,
-    delistProduct,
+    publishProduct,
+    unpublishProduct,
   };
 }

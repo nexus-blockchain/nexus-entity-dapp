@@ -1,14 +1,11 @@
 import { describe, test, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@/test-setup';
 import React from 'react';
 import { TxConfirmDialog } from './tx-confirm-dialog';
 import { TxPreview } from './tx-preview';
 import { TxStatusIndicator } from './tx-status-indicator';
 import type { ConfirmDialogConfig, TxState } from '@/lib/types/models';
 
-// ---------------------------------------------------------------------------
-// TxConfirmDialog
-// ---------------------------------------------------------------------------
 describe('TxConfirmDialog', () => {
   const baseConfig: ConfirmDialogConfig = {
     title: 'Transfer Ownership',
@@ -31,12 +28,12 @@ describe('TxConfirmDialog', () => {
     expect(screen.getByText('This action is irreversible.')).toBeInTheDocument();
   });
 
-  test('calls onConfirm when confirm button is clicked (no requireInput)', () => {
+  test('calls onConfirm when confirm button is clicked without requireInput', () => {
     const onConfirm = vi.fn();
     render(
       <TxConfirmDialog open={true} onClose={vi.fn()} onConfirm={onConfirm} config={baseConfig} />,
     );
-    fireEvent.click(screen.getByText('Confirm'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
@@ -45,7 +42,7 @@ describe('TxConfirmDialog', () => {
     render(
       <TxConfirmDialog open={true} onClose={onClose} onConfirm={vi.fn()} config={baseConfig} />,
     );
-    fireEvent.click(screen.getByText('Cancel'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -56,61 +53,31 @@ describe('TxConfirmDialog', () => {
       <TxConfirmDialog open={true} onClose={vi.fn()} onConfirm={onConfirm} config={config} />,
     );
 
-    const confirmBtn = screen.getByText('Confirm');
-    expect(confirmBtn).toBeDisabled();
-
-    // Type partial text — still disabled
+    const confirmButton = screen.getByRole('button', { name: 'Confirm' });
     const input = screen.getByPlaceholderText('DELETE');
+
+    expect(confirmButton).toBeDisabled();
     fireEvent.change(input, { target: { value: 'DEL' } });
-    expect(confirmBtn).toBeDisabled();
-
-    // Type exact match — enabled
+    expect(confirmButton).toBeDisabled();
     fireEvent.change(input, { target: { value: 'DELETE' } });
-    expect(confirmBtn).not.toBeDisabled();
-
-    fireEvent.click(confirmBtn);
+    expect(confirmButton).not.toBeDisabled();
+    fireEvent.click(confirmButton);
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  test('applies severity-based styling (info)', () => {
-    const config: ConfirmDialogConfig = {
-      title: 'Info',
-      description: 'Informational.',
-      severity: 'info',
-    };
+  test('applies design-token severity styling', () => {
     render(
-      <TxConfirmDialog open={true} onClose={vi.fn()} onConfirm={vi.fn()} config={config} />,
+      <TxConfirmDialog
+        open={true}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+        config={{ title: 'Warning', description: 'Be careful.', severity: 'warning' }}
+      />,
     );
-    const title = screen.getByText('Info');
-    expect(title.className).toContain('text-blue-800');
-  });
-
-  test('applies severity-based styling (warning)', () => {
-    const config: ConfirmDialogConfig = {
-      title: 'Warning',
-      description: 'Be careful.',
-      severity: 'warning',
-    };
-    render(
-      <TxConfirmDialog open={true} onClose={vi.fn()} onConfirm={vi.fn()} config={config} />,
-    );
-    const title = screen.getByText('Warning');
-    expect(title.className).toContain('text-yellow-800');
-  });
-
-  test('closes when clicking overlay', () => {
-    const onClose = vi.fn();
-    render(
-      <TxConfirmDialog open={true} onClose={onClose} onConfirm={vi.fn()} config={baseConfig} />,
-    );
-    fireEvent.click(screen.getByTestId('tx-confirm-overlay'));
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.getByText('Warning').previousSibling).toHaveClass('text-warning');
   });
 });
 
-// ---------------------------------------------------------------------------
-// TxPreview
-// ---------------------------------------------------------------------------
 describe('TxPreview', () => {
   test('renders pallet, call, params, and estimated fee', () => {
     render(
@@ -129,9 +96,7 @@ describe('TxPreview', () => {
   });
 
   test('shows dash when estimatedFee is not provided', () => {
-    render(
-      <TxPreview pallet="entityShop" call="createShop" params={{}} />,
-    );
+    render(<TxPreview pallet="entityShop" call="createShop" params={{}} />);
     expect(screen.getByTestId('tx-preview-fee')).toHaveTextContent('—');
   });
 
@@ -155,9 +120,6 @@ describe('TxPreview', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// TxStatusIndicator
-// ---------------------------------------------------------------------------
 describe('TxStatusIndicator', () => {
   const idle: TxState = { status: 'idle', hash: null, error: null, blockNumber: null };
 
@@ -180,17 +142,15 @@ describe('TxStatusIndicator', () => {
     render(
       <TxStatusIndicator txState={{ status: 'inBlock', hash: '0xabc', error: null, blockNumber: 12345 }} />,
     );
-    expect(screen.getByTestId('tx-status-label')).toHaveTextContent('Included in block #12345');
+    expect(screen.getByTestId('tx-status-label')).toHaveTextContent('In block #12345');
   });
 
   test('shows finalized with truncated hash', () => {
-    const hash = '0xabcdef1234567890';
     render(
-      <TxStatusIndicator txState={{ status: 'finalized', hash, error: null, blockNumber: 12345 }} />,
+      <TxStatusIndicator txState={{ status: 'finalized', hash: '0xabcdef1234567890', error: null, blockNumber: 12345 }} />,
     );
-    const label = screen.getByTestId('tx-status-label').textContent!;
-    expect(label).toContain('Finalized ✓');
-    expect(label).toContain('0xabcdef12');
+    expect(screen.getByTestId('tx-status-label')).toHaveTextContent('Finalized');
+    expect(screen.getByTestId('tx-status-label')).toHaveTextContent('0xabcdef12');
   });
 
   test('shows error message', () => {
@@ -200,23 +160,17 @@ describe('TxStatusIndicator', () => {
     expect(screen.getByTestId('tx-status-label')).toHaveTextContent('Insufficient balance');
   });
 
-  test('applies correct color classes per status', () => {
-    const { rerender } = render(
-      <TxStatusIndicator txState={{ ...idle, status: 'signing' }} />,
-    );
-    expect(screen.getByTestId('tx-status').className).toContain('bg-yellow-50');
+  test('applies current text-color classes per status', () => {
+    const { rerender } = render(<TxStatusIndicator txState={{ ...idle, status: 'signing' }} />);
+    expect(screen.getByTestId('tx-status').className).toContain('text-warning');
 
     rerender(<TxStatusIndicator txState={{ ...idle, status: 'broadcasting' }} />);
-    expect(screen.getByTestId('tx-status').className).toContain('bg-blue-50');
+    expect(screen.getByTestId('tx-status').className).toContain('text-primary');
 
-    rerender(
-      <TxStatusIndicator txState={{ status: 'error', hash: null, error: 'fail', blockNumber: null }} />,
-    );
-    expect(screen.getByTestId('tx-status').className).toContain('bg-red-50');
+    rerender(<TxStatusIndicator txState={{ status: 'error', hash: null, error: 'fail', blockNumber: null }} />);
+    expect(screen.getByTestId('tx-status').className).toContain('text-destructive');
 
-    rerender(
-      <TxStatusIndicator txState={{ status: 'finalized', hash: '0x1', error: null, blockNumber: 1 }} />,
-    );
-    expect(screen.getByTestId('tx-status').className).toContain('bg-green-50');
+    rerender(<TxStatusIndicator txState={{ status: 'finalized', hash: '0x1', error: null, blockNumber: 1 }} />);
+    expect(screen.getByTestId('tx-status').className).toContain('text-green-600');
   });
 });

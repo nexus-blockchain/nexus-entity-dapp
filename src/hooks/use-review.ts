@@ -55,8 +55,46 @@ export function useReview() {
   const reviewsQuery = useEntityQuery<ReviewData[]>(
     ['entity', entityId, 'reviews'],
     async (api) => {
-      const raw = await (api.query as any).entityReview.reviews.entries();
-      // reviews is a single-key StorageMap; filter by entityId client-side
+      const pallet = (api.query as any).entityReview;
+      if (!pallet) return [];
+
+      // Prefer indexed lookup: entityReviews(entityId) → BoundedVec<u64>
+      const idsFn = pallet.entityReviews ?? pallet.productReviews;
+      if (idsFn) {
+        try {
+          const idsRaw = await idsFn(entityId);
+          const ids = idsRaw?.toJSON?.() ?? idsRaw;
+          if (Array.isArray(ids) && ids.length > 0) {
+            const reviewFn = pallet.reviews;
+            if (reviewFn) {
+              const results = await Promise.all(
+                ids.map(Number).map(async (reviewId: number) => {
+                  const raw = await reviewFn(reviewId);
+                  if (!raw || (raw as any).isNone) return null;
+                  const obj = (raw as any).toJSON?.() ?? raw;
+                  return {
+                    id: reviewId,
+                    entityId: Number(obj.entityId ?? obj.entity_id ?? entityId),
+                    orderId: Number(obj.orderId ?? obj.order_id ?? 0),
+                    reviewer: String(obj.reviewer ?? ''),
+                    rating: Number(obj.rating ?? 0),
+                    contentCid: String(obj.contentCid ?? obj.content_cid ?? ''),
+                    createdAt: Number(obj.createdAt ?? obj.created_at ?? 0),
+                  } as ReviewData;
+                }),
+              );
+              return results.filter((r): r is ReviewData => r !== null);
+            }
+          }
+        } catch {
+          // fall through to entries scan
+        }
+      }
+
+      // Fallback: full scan (for chains without entityReviews index)
+      const reviewsFn = pallet.reviews;
+      if (!reviewsFn?.entries) return [];
+      const raw = await reviewsFn.entries();
       const filtered = (raw as [any, any][]).filter(([, value]) => {
         const obj = value?.toJSON?.() ?? value;
         const eid = Number(obj.entityId ?? obj.entity_id ?? 0);
@@ -70,10 +108,16 @@ export function useReview() {
   const reviewEnabledQuery = useEntityQuery<boolean>(
     ['entity', entityId, 'reviews', 'enabled'],
     async (api) => {
-      const raw = await (api.query as any).entityReview.reviewEnabled(entityId);
-      if (raw === undefined || raw === null) return true;
-      const val = (raw as any).unwrapOr?.(true) ?? raw;
-      return Boolean(val?.toJSON?.() ?? val);
+      // Chain: EntityReviewDisabled is OptionQuery with value ()
+      // Key exists → disabled=true (review off), key absent → enabled=true (review on)
+      // Polkadot.js returns an Option: isSome means key exists (disabled), isNone means absent (enabled)
+      const fn = (api.query as any).entityReview.entityReviewDisabled;
+      if (!fn) return true;
+      const raw = await fn(entityId);
+      // isNone = key does not exist → reviews are enabled
+      if ((raw as any).isNone) return true;
+      // isSome or truthy = key exists → reviews are disabled
+      return false;
     },
     { staleTime: STALE_TIMES.token },
   );

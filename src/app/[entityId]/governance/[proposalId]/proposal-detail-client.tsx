@@ -14,6 +14,7 @@ import { useWalletStore } from '@/stores/wallet-store';
 import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils/cn';
+import { CopyableAddress } from '@/components/copyable-address';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,10 +26,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
-
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-6)}` : addr;
 }
 
 // ─── Vote Progress Bar ──────────────────────────────────────
@@ -49,14 +46,13 @@ function VoteBar({ label, count, total, color }: { label: string; count: bigint;
 // ─── Voting Section ─────────────────────────────────────────
 
 function VotingActions({ proposalId }: { proposalId: number }) {
-  const { entityId } = useEntityContext();
   const { vote } = useGovernance();
   const walletAddress = useWalletStore((s) => s.address);
   const t = useTranslations('governance');
 
   const handleVote = useCallback((option: VoteOption) => {
-    vote.mutate([entityId, proposalId, option]);
-  }, [entityId, proposalId, vote]);
+    vote.mutate([proposalId, option]);
+  }, [proposalId, vote]);
 
   if (!walletAddress) {
     return <p className="text-sm text-muted-foreground">{t('connectWalletToVote')}</p>;
@@ -96,11 +92,10 @@ function VotingActions({ proposalId }: { proposalId: number }) {
 // ─── Admin Actions ──────────────────────────────────────────
 
 function AdminActions({ proposalId, status, executed }: { proposalId: number; status: string; executed: boolean }) {
-  const { entityId } = useEntityContext();
   const { finalizeVoting, executeProposal } = useGovernance();
   const t = useTranslations('governance');
 
-  const canFinalize = status === 'Active' || status === 'Pending';
+  const canFinalize = status === 'Voting';
   const canExecute = status === 'Passed' && !executed;
 
   return (
@@ -108,7 +103,7 @@ function AdminActions({ proposalId, status, executed }: { proposalId: number; st
       {canFinalize && (
         <div className="flex items-center gap-3">
           <Button
-            onClick={() => finalizeVoting.mutate([entityId, proposalId])}
+            onClick={() => finalizeVoting.mutate([proposalId])}
             disabled={isTxBusy(finalizeVoting)}
           >
             {t('finalizeVoting')}
@@ -119,7 +114,7 @@ function AdminActions({ proposalId, status, executed }: { proposalId: number; st
       {canExecute && (
         <div className="flex items-center gap-3">
           <Button
-            onClick={() => executeProposal.mutate([entityId, proposalId])}
+            onClick={() => executeProposal.mutate([proposalId])}
             disabled={isTxBusy(executeProposal)}
             className="bg-purple-600 hover:bg-purple-700"
           >
@@ -135,21 +130,23 @@ function AdminActions({ proposalId, status, executed }: { proposalId: number; st
 // ─── Status Badge Mapping ───────────────────────────────────
 
 const STATUS_BADGE_VARIANT: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' }> = {
-  Pending: { variant: 'warning' },
-  Active: { variant: 'default' },
+  Voting: { variant: 'default' },
   Passed: { variant: 'success' },
-  Rejected: { variant: 'destructive' },
+  Failed: { variant: 'destructive' },
   Executed: { variant: 'secondary' },
   Cancelled: { variant: 'outline' },
+  Expired: { variant: 'outline' },
+  ExecutionFailed: { variant: 'destructive' },
 };
 
 const STATUS_LABEL_KEY: Record<string, string> = {
-  Pending: 'statusPending',
-  Active: 'statusActive',
+  Voting: 'statusVoting',
   Passed: 'statusPassed',
-  Rejected: 'statusRejected',
+  Failed: 'statusFailed',
   Executed: 'statusExecuted',
   Cancelled: 'statusCancelled',
+  Expired: 'statusExpired',
+  ExecutionFailed: 'statusExecutionFailed',
 };
 
 // ─── Skeleton Loading ───────────────────────────────────────
@@ -195,7 +192,7 @@ export function ProposalDetailPage() {
   const entityId = Number(params.entityId);
   const proposalId = Number(params.proposalId);
   const { governanceMode } = useEntityContext();
-  const { proposals, isLoading, error } = useGovernance();
+  const { proposals, isLoading, error, tokenTotalSupply } = useGovernance();
 
   if (governanceMode === GovernanceMode.None) {
     return (
@@ -239,9 +236,9 @@ export function ProposalDetailPage() {
     );
   }
 
-  const result = computeProposalResult(proposal);
+  const result = computeProposalResult(proposal, tokenTotalSupply);
   const totalVotes = Number(proposal.votesApprove) + Number(proposal.votesReject) + Number(proposal.votesAbstain);
-  const isVotingOpen = proposal.status === 'Active' || proposal.status === 'Pending';
+  const isVotingOpen = proposal.status === 'Voting';
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
@@ -268,9 +265,22 @@ export function ProposalDetailPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>{t('proposalTypeLabel')}: {proposal.proposalType}</p>
-          <p>{t('proposerLabel')}: {shortAddr(proposal.proposer)}</p>
+          <p className="inline-flex items-center gap-1">{t('proposerLabel')}: <CopyableAddress address={proposal.proposer} textClassName="text-xs" /></p>
           <p>{t('endBlockLabel')}: #{proposal.endBlock}</p>
           {proposal.description && <p className="mt-3">{proposal.description}</p>}
+          {/* Proposal payload details */}
+          {proposal.proposalPayload && Object.keys(proposal.proposalPayload).length > 0 && (
+            <div className="mt-3 rounded-md border bg-muted/50 p-3">
+              <p className="text-xs font-medium">{t('proposalTypeLabel')}</p>
+              <div className="mt-1 space-y-1">
+                {Object.entries(proposal.proposalPayload).map(([key, value]) => (
+                  <p key={key} className="text-xs">
+                    <span className="font-mono text-muted-foreground">{key}</span>: {String(value)}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

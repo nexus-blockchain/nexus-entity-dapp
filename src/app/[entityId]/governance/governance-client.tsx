@@ -4,6 +4,7 @@ import React, { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useGovernance, computeProposalResult } from '@/hooks/use-governance';
+import { useIpfsUpload } from '@/hooks/use-ipfs-upload';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -11,12 +12,14 @@ import { GovernanceMode, ProposalCategory } from '@/lib/types/enums';
 
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
+import { CopyableAddress } from '@/components/copyable-address';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
@@ -31,48 +34,133 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { LabelWithTip } from '@/components/field-help-tip';
 
-// ─── Proposal Types by Category ─────────────────────────────
+// ─── Proposal Types by Category (matching chain-side ProposalType enum) ───
 
-const PROPOSAL_TYPES_KEYS: Record<string, { types: string[] }> = {
+/** Payload field type definitions for dynamic form rendering */
+type FieldType = 'u8' | 'u16' | 'u32' | 'u64' | 'Balance' | 'bool' | 'BoundedVec' | 'Option<Balance>' | 'Option<u16>' | 'Option<BoundedVec>';
+
+interface ProposalTypeInfo {
+  /** Payload fields; empty = no payload (simple variant) */
+  fields: Record<string, FieldType>;
+}
+
+const PROPOSAL_TYPES_KEYS: Record<string, { types: Record<string, ProposalTypeInfo> }> = {
   [ProposalCategory.EntityManagement]: {
-    types: [
-      'UpdateEntityName', 'UpdateEntityLogo', 'UpdateEntityDescription',
-      'UpdateEntityMetadata', 'TransferOwnership', 'RequestCloseEntity',
-    ],
+    types: {
+      General: { fields: { title_cid: 'BoundedVec', content_cid: 'BoundedVec' } },
+      CommunityEvent: { fields: { event_cid: 'BoundedVec' } },
+      RuleSuggestion: { fields: { suggestion_cid: 'BoundedVec' } },
+      EmergencyPauseToggle: { fields: { enabled: 'bool' } },
+      BatchCancelToggle: { fields: { enabled: 'bool' } },
+      FundProtectionChange: { fields: { min_treasury_threshold: 'Balance', max_single_spend: 'Balance', max_daily_spend: 'Balance' } },
+    },
   },
   [ProposalCategory.ShopManagement]: {
-    types: ['CreateShop', 'UpdateShop', 'PauseShop', 'ResumeShop', 'CloseShop'],
+    types: {
+      Promotion: { fields: { discount_rate: 'u16', duration_blocks: 'u32' } },
+      ShopNameChange: { fields: { new_name: 'BoundedVec' } },
+      ShopDescriptionChange: { fields: { description_cid: 'BoundedVec' } },
+      ShopPause: { fields: { shop_id: 'u64' } },
+      ShopResume: { fields: { shop_id: 'u64' } },
+      ShopClose: { fields: { shop_id: 'u64' } },
+      ShopTypeChange: { fields: { shop_id: 'u64', new_type: 'u8' } },
+      ShopPoliciesChange: { fields: { policies_cid: 'BoundedVec' } },
+      PointsConfigChange: { fields: { reward_rate: 'u16', exchange_rate: 'u16', transferable: 'bool' } },
+      PointsToggle: { fields: { enabled: 'bool' } },
+      PriceChange: { fields: { product_id: 'u64', new_usdt_price: 'u64' } },
+      ProductListing: { fields: { product_cid: 'BoundedVec' } },
+      ProductDelisting: { fields: { product_id: 'u64' } },
+      InventoryAdjustment: { fields: { product_id: 'u64', new_inventory: 'u64' } },
+      ProductVisibilityChange: { fields: { product_id: 'u64', visibility: 'u8' } },
+    },
   },
   [ProposalCategory.TokenManagement]: {
-    types: [
-      'MintTokens', 'BurnTokens', 'SetTransferRestriction',
-      'UpdateTokenMetadata', 'CreateSaleRound', 'SetDividendPolicy',
-    ],
+    types: {
+      TokenConfigChange: { fields: { reward_rate: 'Option<u16>', exchange_rate: 'Option<u16>' } },
+      TokenMint: { fields: { amount: 'Balance', recipient_cid: 'BoundedVec' } },
+      TokenBurn: { fields: { amount: 'Balance' } },
+      AirdropDistribution: { fields: { airdrop_cid: 'BoundedVec', total_amount: 'Balance' } },
+      Dividend: { fields: { rate: 'u16' } },
+      TokenMaxSupplyChange: { fields: { new_max_supply: 'Balance' } },
+      TokenTypeChange: { fields: { new_type: 'u8' } },
+      TransferRestrictionChange: { fields: { restriction: 'u8', min_receiver_kyc: 'u8' } },
+      TokenBlacklistManage: { fields: { account_cid: 'BoundedVec', add: 'bool' } },
+    },
   },
   [ProposalCategory.MarketManagement]: {
-    types: ['SetPriceProtection', 'ToggleCircuitBreaker', 'UpdateMarketConfig', 'SetTradingFee'],
+    types: {
+      MarketConfigChange: { fields: { min_order_amount: 'Balance', order_ttl: 'u32' } },
+      MarketPause: { fields: {} },
+      MarketResume: { fields: {} },
+      MarketClose: { fields: {} },
+      PriceProtectionChange: { fields: { max_price_deviation: 'u16', max_slippage: 'u16', circuit_breaker_threshold: 'u16', min_trades_for_twap: 'u32' } },
+      MarketKycChange: { fields: { min_kyc_level: 'u8' } },
+      CircuitBreakerLift: { fields: {} },
+      FeeAdjustment: { fields: { new_fee_rate: 'u16' } },
+      RevenueShare: { fields: { owner_share: 'u16', token_holder_share: 'u16' } },
+      RefundPolicy: { fields: { policy_cid: 'BoundedVec' } },
+      TreasurySpend: { fields: { amount: 'Balance', recipient_cid: 'BoundedVec', reason_cid: 'BoundedVec' } },
+      TreasuryAllocateToShop: { fields: { shop_id: 'u64', amount: 'Balance' } },
+    },
   },
   [ProposalCategory.MemberManagement]: {
-    types: [
-      'SetRegistrationPolicy', 'AddCustomLevel', 'UpdateCustomLevel',
-      'SetUpgradeTrigger', 'BanMember', 'UnbanMember',
-    ],
+    types: {
+      MemberPolicyChange: { fields: { policy: 'u8' } },
+      UpgradeRuleToggle: { fields: { enabled: 'bool' } },
+      MemberStatsPolicyChange: { fields: { qualified_only: 'bool', subtract_on_removal: 'bool' } },
+      AddCustomLevel: { fields: { level_id: 'u8', name: 'BoundedVec', threshold: 'Balance', discount_rate: 'u16', commission_bonus: 'u16' } },
+      UpdateCustomLevel: { fields: { level_id: 'u8', name: 'Option<BoundedVec>', threshold: 'Option<Balance>', discount_rate: 'Option<u16>', commission_bonus: 'Option<u16>' } },
+      RemoveCustomLevel: { fields: { level_id: 'u8' } },
+      SetUpgradeMode: { fields: { mode: 'u8' } },
+      EnableCustomLevels: { fields: { enabled: 'bool' } },
+      KycRequirementChange: { fields: { min_level: 'u8', mandatory: 'bool', grace_period: 'u32' } },
+      KycProviderAuthorize: { fields: { provider_id: 'u64' } },
+      KycProviderDeauthorize: { fields: { provider_id: 'u64' } },
+    },
   },
   [ProposalCategory.CommissionManagement]: {
-    types: [
-      'SetCommissionRate', 'EnableCommissionPlugin', 'DisableCommissionPlugin',
-      'UpdateWithdrawalConfig', 'PauseWithdrawal', 'ResumeWithdrawal',
-    ],
+    types: {
+      CommissionModesChange: { fields: { modes: 'u16' } },
+      CommissionRateChange: { fields: { new_rate: 'u16' } },
+      CommissionToggle: { fields: { enabled: 'bool' } },
+      CreatorRewardRateChange: { fields: { new_rate: 'u16' } },
+      DirectRewardChange: { fields: { rate: 'u16' } },
+      WithdrawalConfigChange: { fields: { tier_configs_cid: 'BoundedVec', enabled: 'bool' } },
+      MinRepurchaseRateChange: { fields: { min_rate: 'u16' } },
+      WithdrawalCooldownChange: { fields: { nex_cooldown: 'u32', token_cooldown: 'u32' } },
+      TokenWithdrawalConfigChange: { fields: { enabled: 'bool' } },
+      WithdrawalPauseToggle: { fields: { paused: 'bool' } },
+      ReferrerGuardChange: { fields: { min_referrer_spent: 'Balance', min_referrer_orders: 'u32' } },
+      CommissionCapChange: { fields: { max_per_order: 'Balance', max_total_earned: 'Balance' } },
+      ReferralValidityChange: { fields: { validity_blocks: 'u32', valid_orders: 'u32' } },
+      MultiLevelPause: { fields: {} },
+      MultiLevelResume: { fields: {} },
+      SingleLineConfigChange: { fields: { upline_rate: 'u16', downline_rate: 'u16', base_upline_levels: 'u8', base_downline_levels: 'u8', max_upline_levels: 'u8', max_downline_levels: 'u8' } },
+      SingleLinePause: { fields: {} },
+      SingleLineResume: { fields: {} },
+      TeamPerformancePause: { fields: {} },
+      TeamPerformanceResume: { fields: {} },
+    },
   },
   [ProposalCategory.DisclosureManagement]: {
-    types: ['PublishDisclosure', 'WithdrawDisclosure', 'SetDisclosurePolicy'],
+    types: {
+      DisclosureLevelChange: { fields: { level: 'u8', insider_trading_control: 'bool', blackout_period_after: 'u32' } },
+      DisclosureResetViolations: { fields: {} },
+      DisclosureInsiderManage: { fields: { account_cid: 'BoundedVec', add: 'bool' } },
+      DisclosurePenaltyChange: { fields: { level: 'u8' } },
+    },
   },
   [ProposalCategory.GovernanceManagement]: {
-    types: [
-      'UpdateQuorum', 'UpdatePassThreshold', 'UpdateVotingPeriod',
-      'AddAdmin', 'RemoveAdmin', 'LockGovernance',
-    ],
+    types: {
+      VotingPeriodChange: { fields: { new_period_blocks: 'u32' } },
+      QuorumChange: { fields: { new_quorum: 'u8' } },
+      ProposalThresholdChange: { fields: { new_threshold: 'u16' } },
+      ExecutionDelayChange: { fields: { new_delay_blocks: 'u32' } },
+      PassThresholdChange: { fields: { new_pass: 'u8' } },
+      AdminVetoToggle: { fields: { enabled: 'bool' } },
+    },
   },
 };
 
@@ -82,20 +170,17 @@ function isTxBusy(m: { txState: { status: string } }): boolean {
   return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
 }
 
-function shortAddr(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-6)}` : addr;
-}
-
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'> = {
-  Pending: 'warning',
-  Active: 'default',
+  Voting: 'default',
   Passed: 'success',
-  Rejected: 'destructive',
+  Failed: 'destructive',
   Executed: 'secondary',
   Cancelled: 'outline',
+  Expired: 'outline',
+  ExecutionFailed: 'destructive',
 };
 
-const STATUS_KEYS: string[] = ['Pending', 'Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
+const STATUS_KEYS: string[] = ['Voting', 'Passed', 'Failed', 'Executed', 'Cancelled', 'Expired', 'ExecutionFailed'];
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -139,32 +224,79 @@ function CreateProposalForm() {
   const te = useTranslations('enums');
   const { entityId } = useEntityContext();
   const { createProposal } = useGovernance();
+  const { uploadText, isUploading, error: uploadError } = useIpfsUpload();
   const [category, setCategory] = useState<string>(ProposalCategory.EntityManagement);
-  const [proposalType, setProposalType] = useState<string>(PROPOSAL_TYPES_KEYS[ProposalCategory.EntityManagement].types[0]);
+  const typesForCategory = PROPOSAL_TYPES_KEYS[category]?.types ?? {};
+  const typeKeys = Object.keys(typesForCategory);
+  const [proposalType, setProposalType] = useState<string>(typeKeys[0] ?? '');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [open, setOpen] = useState(false);
+  const [payloadValues, setPayloadValues] = useState<Record<string, string>>({});
+
+  const currentTypeInfo = typesForCategory[proposalType];
+  const hasPayload = currentTypeInfo && Object.keys(currentTypeInfo.fields).length > 0;
 
   const handleCategoryChange = useCallback((cat: string) => {
     setCategory(cat);
-    const firstType = PROPOSAL_TYPES_KEYS[cat]?.types[0] ?? '';
-    setProposalType(firstType);
+    const keys = Object.keys(PROPOSAL_TYPES_KEYS[cat]?.types ?? {});
+    setProposalType(keys[0] ?? '');
+    setPayloadValues({});
   }, []);
 
-  const handleSubmit = useCallback(() => {
-    if (!title.trim() || !proposalType) return;
-    createProposal.mutate([entityId, proposalType, title.trim(), description.trim()]);
+  const handleTypeChange = useCallback((type: string) => {
+    setProposalType(type);
+    setPayloadValues({});
+  }, []);
+
+  const setPayloadField = useCallback((key: string, value: string) => {
+    setPayloadValues((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  /** Build the Polkadot.js-compatible proposal type argument. */
+  function buildProposalTypeArg(): string | Record<string, unknown> {
+    if (!currentTypeInfo || !hasPayload) {
+      // Simple variant (no payload)
+      return proposalType;
+    }
+    // Complex variant: { VariantName: { field1: value1, ... } }
+    const payload: Record<string, unknown> = {};
+    for (const [fieldName, fieldType] of Object.entries(currentTypeInfo.fields)) {
+      const raw = payloadValues[fieldName] ?? '';
+      if (fieldType === 'bool') {
+        payload[fieldName] = raw === 'true';
+      } else if (fieldType === 'Balance' || fieldType === 'u64') {
+        payload[fieldName] = raw || '0';
+      } else if (fieldType === 'u8' || fieldType === 'u16' || fieldType === 'u32') {
+        payload[fieldName] = Number(raw || 0);
+      } else if (fieldType.startsWith('Option<')) {
+        payload[fieldName] = raw.trim() ? (fieldType.includes('Balance') ? raw : Number(raw)) : null;
+      } else {
+        // BoundedVec<u8> — pass as string, Polkadot.js encodes it
+        payload[fieldName] = raw;
+      }
+    }
+    return { [proposalType]: payload };
+  }
+
+  const handleSubmit = useCallback(async () => {
+    if (!title.trim() || !description.trim() || !proposalType || isUploading) return;
+    const descriptionCid = await uploadText(description.trim());
+    if (!descriptionCid) return;
+    const typeArg = buildProposalTypeArg();
+    createProposal.mutate([entityId, typeArg, title.trim(), descriptionCid]);
     setTitle('');
     setDescription('');
+    setPayloadValues({});
     setOpen(false);
-  }, [entityId, proposalType, title, description, createProposal]);
+  }, [description, entityId, isUploading, proposalType, title, uploadText, createProposal, payloadValues, currentTypeInfo, hasPayload]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>{t('createProposal')}</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('createProposal')}</DialogTitle>
           <DialogDescription>{t('createProposalDesc')}</DialogDescription>
@@ -173,7 +305,7 @@ function CreateProposalForm() {
         <div className="space-y-4 py-2">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>{t('proposalCategory')}</Label>
+              <LabelWithTip tip={t('help.proposalCategory')}>{t('proposalCategory')}</LabelWithTip>
               <Select value={category} onValueChange={handleCategoryChange}>
                 <SelectTrigger>
                   <SelectValue placeholder={t('selectCategory')} />
@@ -186,14 +318,14 @@ function CreateProposalForm() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>{t('proposalType')}</Label>
-              <Select value={proposalType} onValueChange={setProposalType}>
+              <LabelWithTip tip={t('help.proposalType')}>{t('proposalType')}</LabelWithTip>
+              <Select value={proposalType} onValueChange={handleTypeChange}>
                 <SelectTrigger>
                   <SelectValue placeholder={t('selectType')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROPOSAL_TYPES_KEYS[category]?.types.map((type) => (
-                    <SelectItem key={type} value={type}>{te(`proposalType.${type}`)}</SelectItem>
+                  {typeKeys.map((type) => (
+                    <SelectItem key={type} value={type}>{te(`proposalType.${type}`, { defaultValue: type })}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -201,7 +333,7 @@ function CreateProposalForm() {
           </div>
 
           <div className="space-y-2">
-            <Label>{t('proposalTitle')}</Label>
+            <LabelWithTip tip={t('help.proposalTitle')}>{t('proposalTitle')}</LabelWithTip>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -210,14 +342,53 @@ function CreateProposalForm() {
           </div>
 
           <div className="space-y-2">
-            <Label>{t('proposalDescription')}</Label>
+            <LabelWithTip tip={t('help.proposalDescription')}>{t('proposalDescription')}</LabelWithTip>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('proposalDescriptionPlaceholder')}
               rows={3}
             />
+            {uploadError && (
+              <p className="text-xs text-destructive">{uploadError}</p>
+            )}
           </div>
+
+          {/* Dynamic payload fields */}
+          {hasPayload && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">{te(`proposalType.${proposalType}`, { defaultValue: proposalType })} — Parameters</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {Object.entries(currentTypeInfo.fields).map(([fieldName, fieldType]) => (
+                    <div key={fieldName} className="space-y-1.5">
+                      <Label htmlFor={`payload-${fieldName}`} className="text-xs">{fieldName}</Label>
+                      {fieldType === 'bool' ? (
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id={`payload-${fieldName}`}
+                            checked={payloadValues[fieldName] === 'true'}
+                            onCheckedChange={(v) => setPayloadField(fieldName, String(v))}
+                          />
+                          <span className="text-xs text-muted-foreground">{payloadValues[fieldName] === 'true' ? 'true' : 'false'}</span>
+                        </div>
+                      ) : (
+                        <Input
+                          id={`payload-${fieldName}`}
+                          type={['u8', 'u16', 'u32', 'u64'].includes(fieldType) ? 'number' : 'text'}
+                          value={payloadValues[fieldName] ?? ''}
+                          onChange={(e) => setPayloadField(fieldName, e.target.value)}
+                          placeholder={fieldType}
+                          className="text-sm"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter className="gap-2">
@@ -227,7 +398,7 @@ function CreateProposalForm() {
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!title.trim() || isTxBusy(createProposal)}
+            disabled={!title.trim() || !description.trim() || isTxBusy(createProposal) || isUploading}
           >
             {t('submitProposal')}
           </Button>
@@ -243,15 +414,16 @@ function ProposalListSection() {
   const t = useTranslations('governance');
   const tc = useTranslations('common');
   const { entityId } = useEntityContext();
-  const { proposals, proposalCount } = useGovernance();
+  const { proposals, proposalCount, tokenTotalSupply } = useGovernance();
 
   const STATUS_LABEL_MAP: Record<string, string> = {
-    Pending: t('statusPending'),
-    Active: t('statusActive'),
+    Voting: t('statusVoting'),
     Passed: t('statusPassed'),
-    Rejected: t('statusRejected'),
+    Failed: t('statusFailed'),
     Executed: t('statusExecuted'),
     Cancelled: t('statusCancelled'),
+    Expired: t('statusExpired'),
+    ExecutionFailed: t('statusExecutionFailed'),
   };
 
   const statusTabs = [
@@ -279,6 +451,7 @@ function ProposalListSection() {
               <ProposalTabContent
                 proposals={tabValue === 'all' ? proposals : proposals.filter((p) => p.status === tabValue)}
                 entityId={entityId}
+                tokenTotalSupply={tokenTotalSupply}
               />
             </TabsContent>
           ))}
@@ -291,19 +464,22 @@ function ProposalListSection() {
 function ProposalTabContent({
   proposals,
   entityId,
+  tokenTotalSupply,
 }: {
   proposals: ReturnType<typeof useGovernance>['proposals'];
   entityId: number;
+  tokenTotalSupply: bigint;
 }) {
   const t = useTranslations('governance');
 
   const STATUS_LABEL_MAP: Record<string, string> = {
-    Pending: t('statusPending'),
-    Active: t('statusActive'),
+    Voting: t('statusVoting'),
     Passed: t('statusPassed'),
-    Rejected: t('statusRejected'),
+    Failed: t('statusFailed'),
     Executed: t('statusExecuted'),
     Cancelled: t('statusCancelled'),
+    Expired: t('statusExpired'),
+    ExecutionFailed: t('statusExecutionFailed'),
   };
 
   if (proposals.length === 0) {
@@ -315,7 +491,7 @@ function ProposalTabContent({
   return (
     <div className="space-y-3">
       {proposals.map((p) => {
-        const result = computeProposalResult(p);
+        const result = computeProposalResult(p, tokenTotalSupply);
         const totalVotes = Number(p.votesApprove) + Number(p.votesReject) + Number(p.votesAbstain);
         const approvalPct = result.approvalPct;
 
@@ -356,7 +532,7 @@ function ProposalTabContent({
                 </div>
 
                 <div className="mt-2 text-xs text-muted-foreground">
-                  {t('proposerLabel', { address: shortAddr(p.proposer) })}
+                  {t('proposerLabel', { address: p.proposer })}
                 </div>
               </CardContent>
             </Card>

@@ -9,7 +9,7 @@ import { NodeHealthIndicator } from '@/components/node-health-indicator';
 import { useWallet } from '@/hooks/use-wallet';
 import { useNexBalance } from '@/hooks/use-external-queries';
 import { isTauri } from '@/lib/utils/platform';
-import { decodeChainString, entityTreasuryAddress } from '@/lib/utils/codec';
+import { decodeChainString, decodeOptionalChainString, entityTreasuryAddress } from '@/lib/utils/codec';
 import { DesktopWalletDialog } from '@/components/wallet/desktop-wallet-dialog';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityQuery } from '@/hooks/use-entity-query';
@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,6 +38,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { CopyableAddress } from '@/components/copyable-address';
 import {
   Wallet,
   LogOut,
@@ -76,10 +78,10 @@ function parseEntityBrief(raw: unknown): EntityData | null {
     id: Number(obj.id ?? 0),
     owner: String(obj.owner ?? ''),
     name: decodeChainString(obj.name),
-    logoCid: obj.logoCid ? decodeChainString(obj.logoCid) : null,
-    descriptionCid: obj.descriptionCid ? decodeChainString(obj.descriptionCid) : null,
-    metadataUri: obj.metadataUri ? decodeChainString(obj.metadataUri) : null,
-    contactCid: obj.contactCid ? decodeChainString(obj.contactCid) : null,
+    logoCid: decodeOptionalChainString(obj.logoCid),
+    descriptionCid: decodeOptionalChainString(obj.descriptionCid),
+    metadataUri: decodeOptionalChainString(obj.metadataUri),
+    contactCid: decodeOptionalChainString(obj.contactCid),
     status: String(obj.status ?? 'Active') as EntityStatus,
     entityType: String(obj.entityType ?? 'Merchant') as EntityType,
     governanceMode: String(obj.governanceMode ?? 'None') as any,
@@ -101,11 +103,6 @@ function formatBalance(bal: bigint): string {
   const frac = bal % BigInt(1e12);
   const fracStr = frac.toString().padStart(12, '0').slice(0, 4);
   return `${whole.toString()}.${fracStr}`;
-}
-
-function shortenAddress(addr: string): string {
-  if (addr.length <= 16) return addr;
-  return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
 }
 
 // ===== Entity Card (reused for both all entities and my entities) =====
@@ -176,9 +173,7 @@ function EntityCard({ ent, router, showOwner, t, te }: { ent: EntitySummary; rou
                 <Building2 className="h-3.5 w-3.5" />
                 {t('owner')}
               </div>
-              <p className="text-xs font-mono text-muted-foreground truncate">
-                {shortenAddress(ent.owner)}
-              </p>
+              <CopyableAddress address={ent.owner} textClassName="text-xs text-muted-foreground" />
             </div>
           )}
           {!showOwner && (
@@ -248,8 +243,8 @@ export function HomePage() {
   // Create entity form
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [entityName, setEntityName] = useState('');
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Merchant);
-  const [initialFund, setInitialFund] = useState('');
+  const [logoCid, setLogoCid] = useState('');
+  const [descriptionCid, setDescriptionCid] = useState('');
   const [referrerAddress, setReferrerAddress] = useState('');
 
   // Entity type filter for all entities list
@@ -261,8 +256,8 @@ export function HomePage() {
     invalidateKeys: [['allEntities'], ['userEntities', address]],
     onSuccess: () => {
       setEntityName('');
-      setEntityType(EntityType.Merchant);
-      setInitialFund('');
+      setLogoCid('');
+      setDescriptionCid('');
       setReferrerAddress('');
       setTimeout(() => setShowCreateDialog(false), 1200);
     },
@@ -283,7 +278,7 @@ export function HomePage() {
       const results: EntitySummary[] = [];
 
       const hasShopPallet = !!(api.query as any).entityShop?.shopEntity;
-      const hasTokenPallet = !!(api.query as any).entityToken?.entityTokenConfigs || !!(api.query as any).entityToken?.tokenConfigs;
+      const hasTokenPallet = !!(api.query as any).entityToken?.entityTokenConfigs;
 
       // Pre-build shopCount map: entityId -> count
       const shopCountMap = new Map<number, number>();
@@ -311,11 +306,11 @@ export function HomePage() {
         try {
           if (hasTokenPallet) {
             // Config tells us if token exists; metadata has name/symbol/decimals
-            const configFn = (api.query as any).entityToken.entityTokenConfigs ?? (api.query as any).entityToken.tokenConfigs;
+            const configFn = (api.query as any).entityToken.entityTokenConfigs;
             const tokenConfigRaw = await configFn(eid);
             if (tokenConfigRaw && !(tokenConfigRaw as { isNone?: boolean }).isNone) {
               // Token exists, read metadata for symbol
-              const metaFn = (api.query as any).entityToken.entityTokenMetadata ?? (api.query as any).entityToken.tokenMetadata;
+              const metaFn = (api.query as any).entityToken.entityTokenMetadata;
               if (metaFn) {
                 const metaRaw = await metaFn(eid);
                 const meta = (metaRaw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? metaRaw;
@@ -426,10 +421,11 @@ export function HomePage() {
 
   const handleCreateEntity = useCallback(async () => {
     if (!entityName.trim()) return;
-    const fundAmount = initialFund ? BigInt(Math.floor(parseFloat(initialFund) * 1e12)) : BigInt(0);
+    const logo = logoCid.trim() || null;
+    const desc = descriptionCid.trim() || null;
     const referrer = referrerAddress.trim() || null;
-    await mutate([entityName.trim(), entityType, fundAmount, referrer]);
-  }, [entityName, entityType, initialFund, referrerAddress, mutate]);
+    await mutate([entityName.trim(), logo, desc, referrer]);
+  }, [entityName, logoCid, descriptionCid, referrerAddress, mutate]);
 
   const handleNexTransfer = useCallback(async () => {
     const to = transferTo.trim();
@@ -480,7 +476,7 @@ export function HomePage() {
           {isConnected ? (
             <Badge variant="success" className="text-xs cursor-pointer" onClick={() => setWalletOpen(!walletOpen)}>
               <Wallet className="mr-1 h-3 w-3" />
-              {walletName ?? shortenAddress(address!)}
+              {walletName ?? (address ? address.slice(0, 8) + '...' : '')}
             </Badge>
           ) : (
             <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setWalletOpen(!walletOpen)}>
@@ -605,7 +601,7 @@ export function HomePage() {
             <Button id="account" variant="outline" className="w-full mb-3 justify-between scroll-mt-4">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4" />
-                <span>{isConnected ? `${t('walletConnected')} · ${walletName ?? shortenAddress(address!)}` : t('walletManagement')}</span>
+                <span>{isConnected ? `${t('walletConnected')} · ${walletName ?? (address ? address.slice(0, 8) + '...' : '')}` : t('walletManagement')}</span>
               </div>
               <ChevronDown className={`h-4 w-4 transition-transform ${walletOpen ? 'rotate-180' : ''}`} />
             </Button>
@@ -658,7 +654,7 @@ export function HomePage() {
                             >
                               <div className="min-w-0 flex-1">
                                 <p className="font-medium">{acc.meta.name || t('unnamed')}</p>
-                                <p className="truncate text-xs text-muted-foreground">{shortenAddress(acc.address)}</p>
+                                <p className="truncate text-xs text-muted-foreground font-mono">{acc.address}</p>
                               </div>
                               <Badge variant="outline" className="shrink-0 text-xs">{acc.meta.source}</Badge>
                             </button>
@@ -686,9 +682,7 @@ export function HomePage() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">{t('address')}</span>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {address ? shortenAddress(address) : '--'}
-                          </span>
+                          {address ? <CopyableAddress address={address} textClassName="text-xs text-muted-foreground" /> : <span className="font-mono text-xs text-muted-foreground">--</span>}
                         </div>
                         <Separator />
                         <div className="flex items-center justify-between">
@@ -718,9 +712,7 @@ export function HomePage() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">{t('address')}</span>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {address ? shortenAddress(address) : '--'}
-                          </span>
+                          {address ? <CopyableAddress address={address} textClassName="text-xs text-muted-foreground" /> : <span className="font-mono text-xs text-muted-foreground">--</span>}
                         </div>
                         <Separator />
                         <div className="flex items-center justify-between">
@@ -758,7 +750,7 @@ export function HomePage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="entity-id">{t('placeholder')}</Label>
+                    <LabelWithTip htmlFor="entity-id" tip={t('help.entityId')}>{t('placeholder')}</LabelWithTip>
                     <div className="flex gap-2">
                       <Input
                         id="entity-id"
@@ -803,7 +795,7 @@ export function HomePage() {
                       <p className="text-sm text-muted-foreground">{t('createEntityDesc')}</p>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">
-                          <Label htmlFor="entity-name">{t('entityName')}</Label>
+                          <LabelWithTip htmlFor="entity-name" tip={t('help.entityName')}>{t('entityName')}</LabelWithTip>
                           <Input
                             id="entity-name"
                             placeholder={t('entityNamePlaceholder')}
@@ -813,26 +805,31 @@ export function HomePage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>{t('entityType')}</Label>
-                          <Select value={entityType} onValueChange={(v) => setEntityType(v as EntityType)} disabled={isTxPending}>
-                            <SelectTrigger><SelectValue placeholder={t('selectType')} /></SelectTrigger>
-                            <SelectContent>
-                              {Object.values(EntityType).map((type) => (
-                                <SelectItem key={type} value={type}>
-                                  {te(`entityType.${type}`)} ({type})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Label htmlFor="logo-cid">Logo CID<span className="ml-1 text-xs text-muted-foreground">{t('optional')}</span></Label>
+                          <Input
+                            id="logo-cid"
+                            placeholder="Qm..."
+                            value={logoCid}
+                            onChange={(e) => setLogoCid(e.target.value)}
+                            disabled={isTxPending}
+                            className="font-mono text-sm"
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="initial-fund">{t('initialFund')}</Label>
-                          <Input id="initial-fund" type="number" min="0" step="0.01" placeholder="0.00" value={initialFund} onChange={(e) => setInitialFund(e.target.value)} disabled={isTxPending} />
+                          <Label htmlFor="desc-cid">Description CID<span className="ml-1 text-xs text-muted-foreground">{t('optional')}</span></Label>
+                          <Input
+                            id="desc-cid"
+                            placeholder="Qm..."
+                            value={descriptionCid}
+                            onChange={(e) => setDescriptionCid(e.target.value)}
+                            disabled={isTxPending}
+                            className="font-mono text-sm"
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="referrer-address">
+                          <LabelWithTip htmlFor="referrer-address" tip={t('help.referrerAddress')}>
                             {t('referrerAddress')}<span className="ml-1 text-xs text-muted-foreground">{t('optional')}</span>
-                          </Label>
+                          </LabelWithTip>
                           <div className="flex items-center gap-2">
                             <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                             <Input id="referrer-address" placeholder="5Xxxx..." value={referrerAddress} onChange={(e) => setReferrerAddress(e.target.value)} disabled={isTxPending} className="font-mono text-sm" />
@@ -848,7 +845,7 @@ export function HomePage() {
                           <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                             <CheckCircle2 className="h-4 w-4" />
                             <span>{t('createSuccess')}</span>
-                            {txState.hash && <span className="font-mono text-xs text-muted-foreground">{shortenAddress(txState.hash)}</span>}
+                            {txState.hash && <CopyableAddress address={txState.hash} textClassName="text-xs text-muted-foreground" />}
                           </div>
                         )}
                         {txState.status === 'error' && (
@@ -913,11 +910,11 @@ export function HomePage() {
                 <CardContent>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="transfer-to">{t('recipientAddress')}</Label>
+                      <LabelWithTip htmlFor="transfer-to" tip={t('help.recipientAddress')}>{t('recipientAddress')}</LabelWithTip>
                       <Input id="transfer-to" type="text" placeholder="5Xxxx..." value={transferTo} onChange={(e) => setTransferTo(e.target.value)} disabled={isNexTransferPending} className="font-mono text-sm" />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="transfer-amount">{t('transferAmount')}</Label>
+                      <LabelWithTip htmlFor="transfer-amount" tip={t('help.transferAmount')}>{t('transferAmount')}</LabelWithTip>
                       <Input id="transfer-amount" type="number" min="0" step="0.0001" placeholder="0.00" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} disabled={isNexTransferPending} />
                       <p className="text-xs text-muted-foreground">{t('availableBalance')}: {formatBalance(balance)} NEX</p>
                     </div>

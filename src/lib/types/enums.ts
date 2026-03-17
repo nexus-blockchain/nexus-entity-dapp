@@ -101,20 +101,19 @@ export enum ProductVisibility {
   LevelGated = 'LevelGated',
 }
 
-// 订单状态 - 12 种
+// 订单状态 - 11 种
 export enum OrderStatus {
   Created = 'Created',
   Paid = 'Paid',
   Shipped = 'Shipped',
-  ServiceStarted = 'ServiceStarted',
-  ServiceCompleted = 'ServiceCompleted',
-  Confirmed = 'Confirmed',
   Completed = 'Completed',
-  RefundRequested = 'RefundRequested',
-  Refunded = 'Refunded',
-  Disputed = 'Disputed',
   Cancelled = 'Cancelled',
+  Disputed = 'Disputed',
+  Refunded = 'Refunded',
   Expired = 'Expired',
+  Processing = 'Processing',
+  AwaitingConfirmation = 'AwaitingConfirmation',
+  PartiallyRefunded = 'PartiallyRefunded',
 }
 
 // 支付资产
@@ -140,6 +139,13 @@ export enum RegistrationPolicy {
   APPROVAL_REQUIRED = 0b00100,
   KYC_REQUIRED = 0b01000,
   KYC_UPGRADE_REQUIRED = 0b10000,
+}
+
+// 会员统计策略位标记
+export enum MemberStatsPolicy {
+  DEFAULT = 0b00,
+  INCLUDE_REPURCHASE_DIRECT = 0b01,
+  INCLUDE_REPURCHASE_INDIRECT = 0b10,
 }
 
 // KYC 等级 - 5 级
@@ -193,6 +199,14 @@ export enum SalesThresholdMode {
   WeightedMix = 'WeightedMix',
 }
 
+// 提现模式 - 4 种
+export enum WithdrawalModeType {
+  FullWithdrawal = 'FullWithdrawal',
+  FixedRate = 'FixedRate',
+  LevelBased = 'LevelBased',
+  MemberChoice = 'MemberChoice',
+}
+
 // 佣金插件模式 - 6 种
 export enum CommissionPlugin {
   Referral = 'Referral',
@@ -203,17 +217,39 @@ export enum CommissionPlugin {
   PoolReward = 'PoolReward',
 }
 
-// 升级触发规则 - 9 种
-export enum UpgradeTrigger {
+// 升级模式 - 2 种（等级系统级别）
+export enum LevelUpgradeMode {
+  AutoUpgrade = 'AutoUpgrade',
+  ManualUpgrade = 'ManualUpgrade',
+}
+
+// 升级触发条件类型 - 6 种（与链上 UpgradeTrigger 变体名一致）
+export enum UpgradeTriggerType {
   PurchaseProduct = 'PurchaseProduct',
-  SingleOrder = 'SingleOrder',
   TotalSpent = 'TotalSpent',
-  OrderCount = 'OrderCount',
-  TotalSpentUsdt = 'TotalSpentUsdt',
-  SingleOrderUsdt = 'SingleOrderUsdt',
+  SingleOrder = 'SingleOrder',
   ReferralCount = 'ReferralCount',
   TeamSize = 'TeamSize',
-  ReferralLevelCount = 'ReferralLevelCount',
+  OrderCount = 'OrderCount',
+}
+
+// 规则冲突策略 - 4 种
+export enum ConflictStrategy {
+  HighestLevel = 'HighestLevel',
+  HighestPriority = 'HighestPriority',
+  LongestDuration = 'LongestDuration',
+  FirstMatch = 'FirstMatch',
+}
+
+// 提案状态 - 7 种（与链端 ProposalStatus 一致）
+export enum ProposalStatus {
+  Voting = 'Voting',
+  Passed = 'Passed',
+  Failed = 'Failed',
+  Executed = 'Executed',
+  Cancelled = 'Cancelled',
+  Expired = 'Expired',
+  ExecutionFailed = 'ExecutionFailed',
 }
 
 // 提案类型分类 - 8 种
@@ -241,13 +277,23 @@ export type TxStatus = 'idle' | 'signing' | 'broadcasting' | 'inBlock' | 'finali
 // 渲染模式 (前端专用)
 export type RenderMode = 'normal' | 'readonly' | 'restricted' | 'not_found';
 
-// 发售轮次状态
+// 发售轮次状态 - 6 种（与链端 RoundStatus 一致）
 export enum SaleRoundStatus {
-  Created = 'Created',
-  Started = 'Started',
-  Subscribing = 'Subscribing',
+  NotStarted = 'NotStarted',
+  Active = 'Active',
   Ended = 'Ended',
-  Claiming = 'Claiming',
+  Cancelled = 'Cancelled',
+  Completed = 'Completed',
+  Paused = 'Paused',
+}
+
+// 发售模式 - 5 种
+export enum SaleMode {
+  FixedPrice = 'FixedPrice',
+  DutchAuction = 'DutchAuction',
+  WhitelistAllocation = 'WhitelistAllocation',
+  FCFS = 'FCFS',
+  Lottery = 'Lottery',
 }
 
 // 会员管理操作
@@ -257,4 +303,33 @@ export enum MemberAction {
   Ban = 'Ban',
   Unban = 'Unban',
   Remove = 'Remove',
+}
+
+// 披露类型 - 13 种（与链端 DisclosureType 一致）
+export enum DisclosureType {
+  AnnualReport = 'AnnualReport',
+  QuarterlyReport = 'QuarterlyReport',
+  MonthlyReport = 'MonthlyReport',
+  MaterialEvent = 'MaterialEvent',
+  RelatedPartyTransaction = 'RelatedPartyTransaction',
+  OwnershipChange = 'OwnershipChange',
+  ManagementChange = 'ManagementChange',
+  BusinessChange = 'BusinessChange',
+  RiskWarning = 'RiskWarning',
+  DividendAnnouncement = 'DividendAnnouncement',
+  TokenIssuance = 'TokenIssuance',
+  Buyback = 'Buyback',
+  Other = 'Other',
+}
+
+// 公告分类 - 8 种（与链端 AnnouncementCategory 一致）
+export enum AnnouncementCategory {
+  General = 'General',
+  Promotion = 'Promotion',
+  SystemUpdate = 'SystemUpdate',
+  Event = 'Event',
+  Policy = 'Policy',
+  Partnership = 'Partnership',
+  Product = 'Product',
+  Other = 'Other',
 }

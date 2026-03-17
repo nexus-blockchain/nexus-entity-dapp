@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ApiPromise } from '@polkadot/api';
 import { useApi } from '@/lib/chain';
 import { useWallet } from './use-wallet';
 import type { TxState, ConfirmDialogConfig } from '@/lib/types';
 import { DANGEROUS_OPERATIONS } from '@/lib/chain/constants';
+import { parseDispatchError } from '@/lib/chain/error-parser';
 
 interface UseEntityMutationOptions {
   onSuccess?: (blockHash: string) => void;
@@ -23,6 +24,9 @@ export function useEntityMutation(
   const { api } = useApi();
   const { address, getSigner } = useWallet();
   const queryClient = useQueryClient();
+  // Stabilize options reference to avoid useCallback invalidation on every render
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const [txState, setTxState] = useState<TxState>({
     status: 'idle',
     hash: null,
@@ -43,6 +47,8 @@ export function useEntityMutation(
         setTxState({ status: 'error', hash: null, error: 'API or wallet not connected', blockNumber: null });
         return;
       }
+
+      let unsub: (() => void) | null = null as (() => void) | null;
 
       try {
         setTxState({ status: 'signing', hash: null, error: null, blockNumber: null });
@@ -70,65 +76,97 @@ export function useEntityMutation(
 
         await new Promise<void>((resolve, reject) => {
           tx.signAndSend(address, { signer }, ({ status, dispatchError }: any) => {
+            // Handle dispatch error as early as possible (inBlock or finalized)
+            if (dispatchError && (status.isInBlock || status.isFinalized)) {
+              const blockHash = status.isFinalized
+                ? status.asFinalized.toHex()
+                : status.asInBlock.toHex();
+              const parsed = parseDispatchError(api, dispatchError);
+              const errorMsg = `${parsed.module}.${parsed.name}: ${parsed.message}`;
+              setTxState({
+                status: 'error',
+                hash: blockHash,
+                error: errorMsg,
+                blockNumber: null,
+              });
+              optionsRef.current?.onError?.(errorMsg);
+              if (unsub) { unsub(); unsub = null; }
+              reject(new Error(errorMsg));
+              return;
+            }
+
             if (status.isInBlock) {
               const blockHash = status.asInBlock.toHex();
-              setTxState({
-                status: 'inBlock',
-                hash: blockHash,
-                error: null,
-                blockNumber: null,
+              // Fetch block number from block hash
+              api.rpc.chain.getHeader(blockHash).then((header: any) => {
+                const blockNum = header.number.toNumber();
+                setTxState({
+                  status: 'inBlock',
+                  hash: blockHash,
+                  error: null,
+                  blockNumber: blockNum,
+                });
+              }).catch(() => {
+                setTxState({
+                  status: 'inBlock',
+                  hash: blockHash,
+                  error: null,
+                  blockNumber: null,
+                });
               });
             }
 
             if (status.isFinalized) {
               const blockHash = status.asFinalized.toHex();
 
-              if (dispatchError) {
-                let errorMsg = 'Transaction failed';
-                if (dispatchError.isModule) {
-                  const decoded = api.registry.findMetaError(dispatchError.asModule);
-                  errorMsg = `${decoded.section}.${decoded.name}: ${decoded.docs.join(' ')}`;
-                }
+              // Fetch block number
+              api.rpc.chain.getHeader(blockHash).then((header: any) => {
+                const blockNum = header.number.toNumber();
                 setTxState({
-                  status: 'error',
+                  status: 'finalized',
                   hash: blockHash,
-                  error: errorMsg,
+                  error: null,
+                  blockNumber: blockNum,
+                });
+              }).catch(() => {
+                setTxState({
+                  status: 'finalized',
+                  hash: blockHash,
+                  error: null,
                   blockNumber: null,
                 });
-                options?.onError?.(errorMsg);
-                reject(new Error(errorMsg));
-                return;
-              }
-
-              setTxState({
-                status: 'finalized',
-                hash: blockHash,
-                error: null,
-                blockNumber: null,
               });
 
               // Invalidate related queries
-              if (options?.invalidateKeys) {
-                for (const key of options.invalidateKeys) {
+              if (optionsRef.current?.invalidateKeys) {
+                if (process.env.NODE_ENV === 'development') {
+                  console.debug(`[useEntityMutation] ${palletName}.${callName} finalized — invalidating keys:`, optionsRef.current.invalidateKeys);
+                }
+                for (const key of optionsRef.current.invalidateKeys) {
                   queryClient.invalidateQueries({ queryKey: key });
                 }
               }
 
-              options?.onSuccess?.(blockHash);
+              if (unsub) { unsub(); unsub = null; }
+              optionsRef.current?.onSuccess?.(blockHash);
               resolve();
             }
+          }).then((unsubFn: () => void) => {
+            unsub = unsubFn;
           }).catch((err: Error) => {
+            if (unsub) { unsub(); unsub = null; }
             setTxState({
               status: 'error',
               hash: null,
               error: err.message,
               blockNumber: null,
             });
-            options?.onError?.(err.message);
+            optionsRef.current?.onError?.(err.message);
             reject(err);
           });
         });
       } catch (err) {
+        if (unsub) { unsub(); unsub = null; }
         const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         setTxState({
           status: 'error',
@@ -136,10 +174,10 @@ export function useEntityMutation(
           error: errorMsg,
           blockNumber: null,
         });
-        options?.onError?.(errorMsg);
+        optionsRef.current?.onError?.(errorMsg);
       }
     },
-    [api, address, getSigner, palletName, callName, queryClient, options],
+    [api, address, getSigner, palletName, callName, queryClient],
   );
 
   return {

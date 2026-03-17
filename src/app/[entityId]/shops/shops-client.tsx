@@ -9,23 +9,20 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { ShopType, EffectiveShopStatus } from '@/lib/types/enums';
 import type { ShopData } from '@/lib/types/models';
-import { isFundWarning } from '@/lib/utils/fund-warning';
+import { isFundWarning, FUND_WARNING_THRESHOLD } from '@/lib/utils/fund-warning';
 
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils/cn';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // ─── Constants ──────────────────────────────────────────────
-
-/** Fund warning threshold: 1 NEX (10^12) */
-const FUND_WARNING_THRESHOLD = BigInt('1000000000000');
 
 const STATUS_BADGE_VARIANT: Record<EffectiveShopStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'; className?: string }> = {
   [EffectiveShopStatus.Active]: { variant: 'success' },
@@ -131,13 +128,6 @@ function ShopCard({ shop, entityId, onTopUp }: { shop: ShopData; entityId: numbe
             </Button>
           </div>
         )}
-
-        {shop.pointsConfig && (
-          <p className="text-xs text-muted-foreground">
-            {t('pointsReward', { reward: shop.pointsConfig.rewardRateBps / 100, exchange: shop.pointsConfig.exchangeRateBps / 100 })}
-            {shop.pointsConfig.transferable ? t('pointsTransferable') : ''}
-          </p>
-        )}
       </CardContent>
     </Card>
   );
@@ -182,7 +172,7 @@ function CreateShopForm() {
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="shop-name">{t('shopName')}</Label>
+            <LabelWithTip htmlFor="shop-name" tip={t('help.shopName')}>{t('shopName')}</LabelWithTip>
             <Input
               id="shop-name"
               type="text"
@@ -194,7 +184,7 @@ function CreateShopForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="shop-type">{t('shopType')}</Label>
+            <LabelWithTip htmlFor="shop-type" tip={t('help.shopType')}>{t('shopType')}</LabelWithTip>
             <Select value={shopType} onValueChange={(v) => setShopType(v as ShopType)}>
               <SelectTrigger id="shop-type">
                 <SelectValue placeholder={t('shopType')} />
@@ -210,7 +200,7 @@ function CreateShopForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="initial-fund">{t('initialFund')}</Label>
+            <LabelWithTip htmlFor="initial-fund" tip={t('help.initialFund')}>{t('initialFund')}</LabelWithTip>
             <Input
               id="initial-fund"
               type="text"
@@ -274,7 +264,7 @@ function TopUpDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="topup-shop-amount">{t('topUpAmount')}</Label>
+            <LabelWithTip htmlFor="topup-shop-amount" tip={t('help.topUpAmount')}>{t('topUpAmount')}</LabelWithTip>
             <Input
               id="topup-shop-amount"
               type="text"

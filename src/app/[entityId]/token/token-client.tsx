@@ -10,10 +10,10 @@ import { AdminPermission } from '@/lib/types/models';
 import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
 
 import { useTranslations } from 'next-intl';
+import { LabelWithTip } from '@/components/field-help-tip';
+import { CopyableAddress } from '@/components/copyable-address';
+import { isValidSubstrateAddress } from '@/lib/utils/address';
 // ─── Constants ──────────────────────────────────────────────
-
-/** pallet-assets offset: asset_id = SHOP_TOKEN_OFFSET + entity_id */
-const SHOP_TOKEN_OFFSET = 1_000_000;
 
 const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
   [TokenType.Points]: '积分',
@@ -42,11 +42,6 @@ function formatTokenAmount(amount: bigint, decimals: number): string {
   const remainder = amount % divisor;
   const decStr = remainder.toString().padStart(decimals, '0').replace(/0+$/, '');
   return decStr ? `${whole.toLocaleString()}.${decStr}` : whole.toLocaleString();
-}
-
-function shortenAddress(addr: string): string {
-  if (addr.length <= 12) return addr;
-  return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
 }
 
 // ─── Create Token Form ──────────────────────────────────────
@@ -91,14 +86,15 @@ function CreateTokenForm() {
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Name */}
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <LabelWithTip className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" tip={t('help.tokenName')}>
                   {t('tokenName')}
-                </label>
+                </LabelWithTip>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t('namePlaceholder')}
+                  maxLength={32}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   required
                 />
@@ -106,14 +102,15 @@ function CreateTokenForm() {
 
               {/* Symbol */}
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <LabelWithTip className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" tip={t('help.symbol')}>
                   {t('symbol')}
-                </label>
+                </LabelWithTip>
                 <input
                   type="text"
                   value={symbol}
                   onChange={(e) => setSymbol(e.target.value)}
                   placeholder={t('symbolPlaceholder')}
+                  maxLength={10}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   required
                 />
@@ -121,9 +118,9 @@ function CreateTokenForm() {
 
               {/* Decimals */}
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <LabelWithTip className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" tip={t('help.decimals')}>
                   {t('decimals')}
-                </label>
+                </LabelWithTip>
                 <input
                   type="number"
                   min="0"
@@ -157,16 +154,24 @@ function CreateTokenForm() {
 
 function TokenInfoCard({
   tokenConfig,
+  assetId,
+  holderCount,
 }: {
   tokenConfig: NonNullable<ReturnType<typeof useEntityToken>['tokenConfig']>;
+  assetId: number;
+  holderCount: number;
 }) {
   const decimals = tokenConfig.decimals;
+  const formatBool = (value: boolean) => (value ? '是' : '否');
+  const formatDividend = tokenConfig.dividendConfig
+    ? `${tokenConfig.dividendConfig.enabled ? '已启用' : '已停用'} / 最小周期 ${tokenConfig.dividendConfig.minPeriod}`
+    : '未配置';
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-900">
       <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">代币信息</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <InfoItem label="资产 ID" value={String(SHOP_TOKEN_OFFSET + tokenConfig.entityId)} />
+        <InfoItem label="资产 ID" value={String(assetId)} />
         <InfoItem label="名称" value={tokenConfig.name} />
         <InfoItem label="符号" value={tokenConfig.symbol} />
         <InfoItem label="精度" value={String(decimals)} />
@@ -176,11 +181,19 @@ function TokenInfoCard({
         />
         <InfoItem label="总供应量" value={formatTokenAmount(tokenConfig.totalSupply, decimals)} />
         <InfoItem label="最大供应量" value={formatTokenAmount(tokenConfig.maxSupply, decimals)} />
+        <InfoItem label="持有人数" value={String(holderCount)} />
         <InfoItem
           label="转账限制"
           value={TRANSFER_RESTRICTION_LABELS[tokenConfig.transferRestriction]}
         />
-        <InfoItem label="持有人数" value={String(tokenConfig.holderCount)} />
+        <InfoItem label="启用状态" value={formatBool(tokenConfig.enabled)} />
+        <InfoItem label="可转账" value={formatBool(tokenConfig.transferable)} />
+        <InfoItem label="奖励比例" value={String(tokenConfig.rewardRate)} />
+        <InfoItem label="兑换比例" value={String(tokenConfig.exchangeRate)} />
+        <InfoItem label="最小赎回" value={formatTokenAmount(tokenConfig.minRedeem, decimals)} />
+        <InfoItem label="单笔最大赎回" value={formatTokenAmount(tokenConfig.maxRedeemPerOrder, decimals)} />
+        <InfoItem label="最小接收方 KYC" value={String(tokenConfig.minReceiverKyc)} />
+        <InfoItem label="分红配置" value={formatDividend} />
       </div>
 
       <div className="mt-4 rounded-md bg-blue-50 px-4 py-3 dark:bg-blue-900/20">
@@ -228,7 +241,6 @@ function MintBurnSection() {
   const { mintTokens, burnTokens } = useEntityToken();
   const [mintAccount, setMintAccount] = useState('');
   const [mintAmount, setMintAmount] = useState('');
-  const [burnAccount, setBurnAccount] = useState('');
   const [burnAmount, setBurnAmount] = useState('');
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
 
@@ -236,9 +248,9 @@ function MintBurnSection() {
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!mintAccount.trim() || !mintAmount.trim()) return;
-      mintTokens.mutate([entityId, mintAccount.trim(), mintAmount.trim()]);
-      setMintAccount('');
-      setMintAmount('');
+      mintTokens.mutate([entityId, mintAccount.trim(), mintAmount.trim()])
+        .then(() => { setMintAccount(''); setMintAmount(''); })
+        .catch(() => {/* keep form values on failure */});
     },
     [entityId, mintAccount, mintAmount, mintTokens],
   );
@@ -246,18 +258,18 @@ function MintBurnSection() {
   const handleBurnSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!burnAccount.trim() || !burnAmount.trim()) return;
+      if (!burnAmount.trim()) return;
       setShowBurnConfirm(true);
     },
-    [burnAccount, burnAmount],
+    [burnAmount],
   );
 
   const handleBurnConfirm = useCallback(() => {
-    burnTokens.mutate([entityId, burnAccount.trim(), burnAmount.trim()]);
-    setBurnAccount('');
-    setBurnAmount('');
     setShowBurnConfirm(false);
-  }, [entityId, burnAccount, burnAmount, burnTokens]);
+    burnTokens.mutate([entityId, burnAmount.trim()])
+      .then(() => setBurnAmount(''))
+      .catch(() => {/* keep form value on failure */});
+  }, [entityId, burnAmount, burnTokens]);
 
   if (isReadOnly || isSuspended) return null;
 
@@ -303,14 +315,6 @@ function MintBurnSection() {
             <h3 className="text-sm font-medium text-red-700 dark:text-red-400">销毁代币 ⚠️</h3>
             <input
               type="text"
-              value={burnAccount}
-              onChange={(e) => setBurnAccount(e.target.value)}
-              placeholder="目标地址"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              required
-            />
-            <input
-              type="text"
               inputMode="decimal"
               value={burnAmount}
               onChange={(e) => setBurnAmount(e.target.value)}
@@ -350,11 +354,29 @@ function MintBurnSection() {
 
 function HoldersList({
   holders,
+  holderCount,
+  holderListAvailable,
   decimals,
 }: {
   holders: { account: string; balance: bigint }[];
+  holderCount: number;
+  holderListAvailable: boolean;
   decimals: number;
 }) {
+  if (!holderListAvailable) {
+    return (
+      <section className="rounded-lg border border-dashed border-gray-300 p-6 dark:border-gray-600">
+        <h2 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">持有人信息</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          当前运行时未提供可直接枚举的持有人列表 storage，页面已降级为仅展示持有人数量。
+        </p>
+        <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+          持有人数：{holderCount}
+        </p>
+      </section>
+    );
+  }
+
   if (holders.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-600">
@@ -379,8 +401,8 @@ function HoldersList({
           <tbody>
             {holders.map((h) => (
               <tr key={h.account} className="border-b last:border-0 dark:border-gray-700">
-                <td className="py-2 pr-4 font-mono text-xs text-gray-700 dark:text-gray-300">
-                  {shortenAddress(h.account)}
+                <td className="py-2 pr-4">
+                  <CopyableAddress address={h.account} textClassName="text-xs text-gray-700 dark:text-gray-300" />
                 </td>
                 <td className="py-2 text-right text-gray-900 dark:text-gray-100">
                   {formatTokenAmount(h.balance, decimals)}
@@ -480,12 +502,19 @@ function ListManagement({
 }) {
   const { isReadOnly, isSuspended } = useEntityContext();
   const [newAccount, setNewAccount] = useState('');
+  const [addressError, setAddressError] = useState('');
 
   const handleAdd = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!newAccount.trim()) return;
-      onAdd(newAccount.trim());
+      const trimmed = newAccount.trim();
+      if (!trimmed) return;
+      if (!isValidSubstrateAddress(trimmed)) {
+        setAddressError('无效的 Substrate 地址');
+        return;
+      }
+      setAddressError('');
+      onAdd(trimmed);
       setNewAccount('');
     },
     [newAccount, onAdd],
@@ -499,11 +528,12 @@ function ListManagement({
 
       {!isReadOnly && !isSuspended && (
         <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
-          <form onSubmit={handleAdd} className="mb-4 flex gap-2">
+          <form onSubmit={handleAdd} className="mb-4 flex flex-col gap-2">
+            <div className="flex gap-2">
             <input
               type="text"
               value={newAccount}
-              onChange={(e) => setNewAccount(e.target.value)}
+              onChange={(e) => { setNewAccount(e.target.value); setAddressError(''); }}
               placeholder="输入账户地址"
               className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
               required
@@ -515,6 +545,8 @@ function ListManagement({
             >
               添加
             </button>
+            </div>
+            {addressError && <p className="text-xs text-red-600">{addressError}</p>}
           </form>
           <TxStatusIndicator txState={addTxState} />
         </PermissionGuard>
@@ -526,9 +558,7 @@ function ListManagement({
         <ul className="space-y-1">
           {items.map((account) => (
             <li key={account} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-800">
-              <span className="font-mono text-xs text-gray-700 dark:text-gray-300">
-                {shortenAddress(account)}
-              </span>
+              <CopyableAddress address={account} textClassName="text-xs text-gray-700 dark:text-gray-300" />
               {!isReadOnly && !isSuspended && (
                 <PermissionGuard required={AdminPermission.TOKEN_MANAGE} fallback={null}>
                   <button
@@ -555,7 +585,10 @@ export function TokenPage() {
   const t = useTranslations('token');
   const { entityId } = useEntityContext();
   const {
+    assetId,
     tokenConfig,
+    holderCount,
+    holderListAvailable,
     holders,
     whitelist,
     blacklist,
@@ -591,11 +624,16 @@ export function TokenPage() {
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('title')}</h1>
 
-      <TokenInfoCard tokenConfig={tokenConfig} />
+      <TokenInfoCard tokenConfig={tokenConfig} assetId={assetId} holderCount={holderCount} />
       <TokenRightsOverview />
       <MintBurnSection />
       <TransferRestrictionSection />
-      <HoldersList holders={holders} decimals={tokenConfig.decimals} />
+      <HoldersList
+        holders={holders}
+        holderCount={holderCount}
+        holderListAvailable={holderListAvailable}
+        decimals={tokenConfig.decimals}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ListManagement

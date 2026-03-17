@@ -675,7 +675,27 @@
       "nexAutoCalc": "NEX Price (auto)",
       "nexManualFallback": "Rate unavailable, enter manually",
       "rateSource": "Rate: {source}",
-      "approxNex": "≈ {amount} NEX"
+      "approxNex": "≈ {amount} NEX",
+      "editProduct": "Edit Product",
+      "editProductDesc": "Edit product #{id}. Only changed fields are submitted.",
+      "deleteProduct": "Delete",
+      "deleteConfirmTitle": "Delete Product",
+      "deleteConfirmDesc": "Delete product #{id}? This cannot be undone. Deposit will be refunded.",
+      "noChanges": "No fields changed",
+      "saveChanges": "Save Changes",
+      "edit": "Edit",
+      "detail": {
+        "title": "Product Detail",
+        "notFound": "Product not found",
+        "backToProducts": "Back to Products",
+        "productInfo": "Product Info",
+        "statusActions": "Status Actions",
+        "editSection": "Edit Product",
+        "editDesc": "Only changed fields are submitted to chain.",
+        "dangerZone": "Danger Zone",
+        "deleteDesc": "Delete this product. This cannot be undone. Deposit will be refunded.",
+        "deleted": "Product deleted"
+      }
     },
     "orders": {
       "title": "Order Management",
@@ -1383,6 +1403,9 @@
     "noTiers": "No tiers configured",
     "addTier": "Add Tier",
     "removeTier": "Remove",
+    "editTier": "Edit",
+    "updateTier": "Update",
+    "cancelEdit": "Cancel",
     "newTierRate": "Rate (bps)",
     "clearConfig": "Clear Config",
     "help": {
@@ -1761,6 +1784,14 @@
     "errorNoRoundDuration": "Please enter a round duration (in blocks) before saving.",
     "errorRatioSumMismatch": "Level ratios must sum to 10000 bps (100%). Current total: {current} bps.",
     "ratioSum": "Total",
+    "editRow": "Edit",
+    "deleteRow": "Delete",
+    "confirmEdit": "OK",
+    "cancelEdit": "Cancel",
+    "unsavedChanges": "Unsaved changes",
+    "cancelChanges": "Discard Changes",
+    "actions": "Actions",
+    "errorMinOneLevel": "At least one level ratio is required.",
     "help": {
       "levelRatios": "Comma-separated level:ratio pairs defining reward share per level (e.g. 1:500, 2:300).",
       "roundDuration": "Duration of each pool reward round in blocks."

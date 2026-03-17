@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "predev": "node scripts/fix-octal-escape.js",
-    "dev": "rm -rf .next && next dev -p 3003",
+    "dev": "rm -rf .next && next dev -p 3003 -H 0.0.0.0",
     "prebuild": "node scripts/fix-octal-escape.js",
     "build": "rm -rf .next out && next build && node scripts/spa-fallback.js",
     "start": "serve out -s -l 3003",

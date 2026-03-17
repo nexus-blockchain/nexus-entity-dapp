@@ -10,7 +10,7 @@ import { ProductCategory, ProductStatus, ProductVisibility } from '@/lib/types/e
 
 // ─── Parser ─────────────────────────────────────────────────
 
-function parseProductData(raw: unknown): ProductData | null {
+export function parseProductData(raw: unknown): ProductData | null {
   if (!raw || (raw as { isNone?: boolean }).isNone) return null;
   const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
   if (!unwrapped) return null;
@@ -94,12 +94,54 @@ export function useProducts(shopId: number) {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'products']],
   });
 
+  const deleteProduct = useEntityMutation('entityProduct', 'deleteProduct', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'products']],
+  });
+
   return {
     products: productsQuery.data ?? [],
     isLoading: productIdsQuery.isLoading || productsQuery.isLoading,
     error: productIdsQuery.error || productsQuery.error,
     createProduct,
     updateProduct,
+    publishProduct,
+    unpublishProduct,
+    deleteProduct,
+  };
+}
+
+// ─── Single Product Hook ─────────────────────────────────────
+
+export function useProduct(productId: number) {
+  const { entityId } = useEntityContext();
+
+  const productQuery = useEntityQuery<ProductData | null>(
+    ['entity', entityId, 'product', productId],
+    async (api) => {
+      if (!hasPallet(api, 'entityProduct')) return null;
+      const raw = await (api.query as any).entityProduct.products(productId);
+      return parseProductData(raw);
+    },
+    { staleTime: STALE_TIMES.products, enabled: productId > 0 },
+  );
+
+  const shopId = productQuery.data?.shopId ?? 0;
+  const invalidateKeys = [
+    ['entity', entityId, 'product', productId],
+    ['entity', entityId, 'shop', shopId, 'products'],
+  ];
+
+  const updateProduct = useEntityMutation('entityProduct', 'updateProduct', { invalidateKeys });
+  const deleteProduct = useEntityMutation('entityProduct', 'deleteProduct', { invalidateKeys });
+  const publishProduct = useEntityMutation('entityProduct', 'publishProduct', { invalidateKeys });
+  const unpublishProduct = useEntityMutation('entityProduct', 'unpublishProduct', { invalidateKeys });
+
+  return {
+    product: productQuery.data ?? null,
+    isLoading: productQuery.isLoading,
+    error: productQuery.error,
+    updateProduct,
+    deleteProduct,
     publishProduct,
     unpublishProduct,
   };

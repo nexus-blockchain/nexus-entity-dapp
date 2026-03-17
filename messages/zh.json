@@ -675,7 +675,27 @@
       "nexAutoCalc": "NEX 价格 (自动计算)",
       "nexManualFallback": "无法获取汇率，请手动输入",
       "rateSource": "汇率: {source}",
-      "approxNex": "≈ {amount} NEX"
+      "approxNex": "≈ {amount} NEX",
+      "editProduct": "编辑商品",
+      "editProductDesc": "编辑商品 #{id}。仅变更字段提交到链上。",
+      "deleteProduct": "删除",
+      "deleteConfirmTitle": "删除商品",
+      "deleteConfirmDesc": "确定删除商品 #{id}？不可撤销，押金将退还。",
+      "noChanges": "未修改任何字段",
+      "saveChanges": "保存修改",
+      "edit": "编辑",
+      "detail": {
+        "title": "商品详情",
+        "notFound": "商品不存在",
+        "backToProducts": "返回商品列表",
+        "productInfo": "商品信息",
+        "statusActions": "状态操作",
+        "editSection": "编辑商品",
+        "editDesc": "仅变更字段提交到链上。",
+        "dangerZone": "危险操作",
+        "deleteDesc": "删除该商品，不可撤销，押金将退还。",
+        "deleted": "商品已删除"
+      }
     },
     "orders": {
       "title": "订单管理",
@@ -1383,6 +1403,9 @@
     "noTiers": "尚未配置层级",
     "addTier": "添加层级",
     "removeTier": "移除",
+    "editTier": "编辑",
+    "updateTier": "更新",
+    "cancelEdit": "取消",
     "newTierRate": "费率 (bps)",
     "clearConfig": "清除配置",
     "help": {
@@ -1761,6 +1784,14 @@
     "errorNoRoundDuration": "请填写轮次时长（区块数）后再保存。",
     "errorRatioSumMismatch": "等级比例之和必须等于 10000 bps（100%），当前总计：{current} bps。",
     "ratioSum": "合计",
+    "editRow": "编辑",
+    "deleteRow": "删除",
+    "confirmEdit": "确定",
+    "cancelEdit": "取消",
+    "unsavedChanges": "有未保存的更改",
+    "cancelChanges": "放弃更改",
+    "actions": "操作",
+    "errorMinOneLevel": "至少需要保留一个等级比例。",
     "help": {
       "levelRatios": "逗号分隔的 等级:比例 对，定义每个等级的奖励份额（如 1:500, 2:300）。",
       "roundDuration": "每轮奖池奖励的持续时间（区块数）。"

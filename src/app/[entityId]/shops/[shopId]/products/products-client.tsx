@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useProducts } from '@/hooks/use-products';
@@ -11,13 +11,12 @@ import { PermissionGuard } from '@/components/permission-guard';
 import { IpfsImage } from '@/components/ipfs-image';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
+import type { ProductData } from '@/lib/types/models';
 import { ProductCategory, ProductVisibility, ProductStatus } from '@/lib/types/enums';
 import { getValidProductTransitions } from '@/lib/utils';
-import type { ProductData } from '@/lib/types/models';
 
 import { useTranslations } from 'next-intl';
-import { cn } from '@/lib/utils/cn';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -215,17 +214,19 @@ function IpfsUploadField({
 
 // ─── Product Card ───────────────────────────────────────────
 
-function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; shopId: number; nexPerUsdt: bigint | null }) {
+function ProductCard({ product, shopId, usdtPerNex }: { product: ProductData; shopId: number; usdtPerNex: bigint | null }) {
   const t = useTranslations('shops');
   const te = useTranslations('enums');
   const badgeCfg = STATUS_BADGE_VARIANT[product.status];
-  const { isReadOnly, isSuspended } = useEntityContext();
+  const { isReadOnly, isSuspended, entityId } = useEntityContext();
   const { publishProduct, unpublishProduct } = useProducts(shopId);
   const validTransitions = getValidProductTransitions(product.status);
   const canAct = !isReadOnly && !isSuspended;
+  const router = useRouter();
 
   const handleTransition = useCallback(
-    (target: ProductStatus) => {
+    (target: ProductStatus, e: React.MouseEvent) => {
+      e.stopPropagation();
       if (target === ProductStatus.OnSale) {
         publishProduct.mutate([product.id]);
       } else if (target === ProductStatus.OffShelf) {
@@ -236,17 +237,19 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
   );
 
   // Compute realtime approx NEX from USDT price + exchange rate
+  // usdtPerNex is USDT/NEX with 10^6 precision; product.usdtPrice is 10^6 precision
+  // nexAmount (10^12) = usdtPrice (10^6) * 10^12 / usdtPerNex (10^6)
   const approxNex = useMemo(() => {
-    if (product.usdtPrice <= 0 || !nexPerUsdt) return null;
-    // usdtPrice is stored as u64 with 10^6 precision
-    // nexPerUsdt is "1 USDT = X NEX" with 10^12 precision
-    // approxNex = usdtPrice * nexPerUsdt / 10^6
-    const raw = BigInt(product.usdtPrice) * nexPerUsdt / BigInt(1_000_000);
+    if (product.usdtPrice <= 0 || !usdtPerNex) return null;
+    const raw = BigInt(product.usdtPrice) * BigInt('1000000000000') / usdtPerNex;
     return raw;
-  }, [product.usdtPrice, nexPerUsdt]);
+  }, [product.usdtPrice, usdtPerNex]);
 
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="cursor-pointer overflow-hidden transition-colors hover:bg-accent/50"
+      onClick={() => router.push(`/${entityId}/shops/${shopId}/products/${product.id}`)}
+    >
       <div className="aspect-square overflow-hidden">
         <IpfsImage cid={product.imagesCid} alt={t('products.productImage')} className="h-full w-full" />
       </div>
@@ -258,7 +261,7 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-2 pb-2">
+      <CardContent className="space-y-2 pb-4">
         {product.usdtPrice > 0 ? (
           <>
             <p className="text-sm font-semibold">${formatUsdtPrice(product.usdtPrice)} USDT</p>
@@ -294,35 +297,35 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
             {t('products.purchaseRange', { min: product.minOrderQuantity, max: product.maxOrderQuantity > 0 ? ` ~ ${product.maxOrderQuantity}` : '+' })}
           </p>
         )}
-      </CardContent>
 
-      {/* Status transition action buttons */}
-      {canAct && validTransitions.length > 0 && (
-        <PermissionGuard required={AdminPermission.SHOP_MANAGE} fallback={null}>
-          <CardFooter className="flex-wrap gap-2 pb-4">
-            {validTransitions
-              .filter((t) => t !== ProductStatus.SoldOut) // SoldOut is chain-automatic
-              .map((target) => {
-                const action = TRANSITION_ACTION[target];
-                const transLabel = target === ProductStatus.OnSale ? t('products.list')
-                  : target === ProductStatus.OffShelf ? t('products.delist')
-                  : target === ProductStatus.Draft ? t('products.toDraft')
-                  : (te as any)(`productStatus.${target}`);
-                return (
-                  <Button
-                    key={target}
-                    variant={action.variant}
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => handleTransition(target)}
-                  >
-                    {transLabel}
-                  </Button>
-                );
-              })}
-          </CardFooter>
-        </PermissionGuard>
-      )}
+        {/* Inline status transition buttons */}
+        {canAct && validTransitions.filter((s) => s !== ProductStatus.SoldOut).length > 0 && (
+          <PermissionGuard required={AdminPermission.SHOP_MANAGE} fallback={null}>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {validTransitions
+                .filter((s) => s !== ProductStatus.SoldOut)
+                .map((target) => {
+                  const action = TRANSITION_ACTION[target];
+                  const transLabel = target === ProductStatus.OnSale ? t('products.list')
+                    : target === ProductStatus.OffShelf ? t('products.delist')
+                    : target === ProductStatus.Draft ? t('products.toDraft')
+                    : te(`productStatus.${target}` as any);
+                  return (
+                    <Button
+                      key={target}
+                      variant={action.variant}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={(e) => handleTransition(target, e)}
+                    >
+                      {transLabel}
+                    </Button>
+                  );
+                })}
+            </div>
+          </PermissionGuard>
+        )}
+      </CardContent>
     </Card>
   );
 }
@@ -332,7 +335,7 @@ function ProductCard({ product, shopId, nexPerUsdt }: { product: ProductData; sh
 function CreateProductForm({ shopId }: { shopId: number }) {
   const { createProduct } = useProducts(shopId);
   const { entityId } = useEntityContext();
-  const { nexPerUsdt, rateSource, isLoading: rateLoading } = useNexUsdtPrice(entityId);
+  const { usdtPerNex, rateSource, isLoading: rateLoading } = useNexUsdtPrice(entityId);
   const t = useTranslations('shops');
   const te = useTranslations('enums');
 
@@ -362,19 +365,19 @@ function CreateProductForm({ shopId }: { shopId: number }) {
 
   // Determine if NEX should be auto-calculated
   const usdtNum = Number(form.priceUsdt) || 0;
-  const nexAutoCalc = usdtNum > 0 && nexPerUsdt !== null;
+  const nexAutoCalc = usdtNum > 0 && usdtPerNex !== null;
   const nexIsReadOnly = nexAutoCalc;
 
   // Auto-calculated NEX display value
+  // usdtPerNex is USDT/NEX with 10^6 precision
+  // nexAmount (10^12) = usdtMicro (10^6) * 10^12 / usdtPerNex (10^6)
   const autoNexDisplay = useMemo(() => {
-    if (!nexAutoCalc || !nexPerUsdt) return '';
-    // USDT input is a human-readable decimal (e.g. "10.5")
-    // Convert to u64 (10^6 precision), then multiply by nexPerUsdt (10^12 precision), divide by 10^6
+    if (!nexAutoCalc || !usdtPerNex) return '';
     const usdtMicro = Math.round(usdtNum * 1_000_000);
     if (usdtMicro <= 0) return '';
-    const rawNex = BigInt(usdtMicro) * nexPerUsdt / BigInt(1_000_000);
+    const rawNex = BigInt(usdtMicro) * BigInt('1000000000000') / usdtPerNex;
     return formatNexBalance(rawNex);
-  }, [nexAutoCalc, nexPerUsdt, usdtNum]);
+  }, [nexAutoCalc, usdtPerNex, usdtNum]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -478,7 +481,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
                   />
                   {rateSource && (
                     <p className="text-xs text-muted-foreground">
-                      {t('products.rateSource', { source: rateSource === 'twap' ? 'TWAP' : rateSource === 'lastPrice' ? 'Last Price' : 'Initial Price' })}
+                      {t('products.rateSource', { source: rateSource === 'twap' ? '1h TWAP' : rateSource === 'lastPrice' ? 'Last Price' : rateSource === 'lastTradePrice' ? 'Last Trade' : 'Initial Price' })}
                     </p>
                   )}
                 </>
@@ -492,7 +495,7 @@ function CreateProductForm({ shopId }: { shopId: number }) {
                     onChange={(e) => setField('priceNex', e.target.value)}
                     placeholder={t('products.nexPrice')}
                   />
-                  {usdtNum > 0 && !rateLoading && !nexPerUsdt && (
+                  {usdtNum > 0 && !rateLoading && !usdtPerNex && (
                     <p className="text-xs text-amber-600">{t('products.nexManualFallback')}</p>
                   )}
                 </>
@@ -607,7 +610,7 @@ export function ProductsPage() {
   const shopId = Number(params.shopId);
   const { isReadOnly, isSuspended, entityId } = useEntityContext();
   const { products, isLoading, error } = useProducts(shopId);
-  const { nexPerUsdt } = useNexUsdtPrice(entityId);
+  const { usdtPerNex } = useNexUsdtPrice(entityId);
 
   if (isLoading) {
     return <ProductsLoadingSkeleton />;
@@ -642,7 +645,7 @@ export function ProductsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((product) => (
-            <ProductCard key={product.id} product={product} shopId={shopId} nexPerUsdt={nexPerUsdt} />
+            <ProductCard key={product.id} product={product} shopId={shopId} usdtPerNex={usdtPerNex} />
           ))}
         </div>
       )}

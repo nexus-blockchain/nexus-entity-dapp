@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
@@ -93,9 +93,33 @@ function ConfigSection() {
   } = usePoolRewardCommission();
   const { customLevels } = useMembers();
 
-  const [levelRatioRows, setLevelRatioRows] = useState<LevelRatioRow[]>([{ levelId: '', ratio: '' }]);
+  // ── Local editing state ──────────────────────────────────
+  const [localRatios, setLocalRatios] = useState<LevelRatioRow[]>([]);
   const [roundDuration, setRoundDuration] = useState('');
   const [formError, setFormError] = useState('');
+
+  // Inline edit
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<LevelRatioRow>({ levelId: '', ratio: '' });
+
+  // Adding new row
+  const [isAdding, setIsAdding] = useState(false);
+  const [addDraft, setAddDraft] = useState<LevelRatioRow>({ levelId: '', ratio: '' });
+
+  // ── Sync chain config → local state (only when not editing) ──
+  useEffect(() => {
+    if (config?.levelRatios && editingIndex === null && !isAdding) {
+      setLocalRatios(
+        config.levelRatios.map(([id, ratio]) => ({
+          levelId: String(id),
+          ratio: String(ratio),
+        })),
+      );
+    } else if (!config?.levelRatios && localRatios.length === 0 && editingIndex === null && !isAdding) {
+      // No chain config yet: start with one empty row for init form
+      setLocalRatios([{ levelId: '', ratio: '' }]);
+    }
+  }, [config?.levelRatios, editingIndex, isAdding, localRatios.length]);
 
   // Build a map from level ID to level name for display
   const levelNameById = useMemo(() => {
@@ -106,42 +130,122 @@ function ConfigSection() {
     return map;
   }, [customLevels]);
 
-  // Selected level IDs (to filter out already-used levels per row)
+  // Dirty detection: compare local vs chain
+  const isDirty = useMemo(() => {
+    const chainRatios = config?.levelRatios ?? [];
+    if (localRatios.length !== chainRatios.length) return true;
+    for (let i = 0; i < localRatios.length; i++) {
+      const [cId, cRatio] = chainRatios[i] ?? [0, 0];
+      if (localRatios[i].levelId !== String(cId) || localRatios[i].ratio !== String(cRatio)) return true;
+    }
+    const chainDuration = config?.roundDuration ?? 0;
+    if (roundDuration !== '' && Number(roundDuration) !== chainDuration) return true;
+    return false;
+  }, [localRatios, config, roundDuration]);
+
+  // Selected level IDs (for filtering available levels)
   const selectedLevelIds = useMemo(() => {
-    return new Set(levelRatioRows.map((r) => r.levelId).filter(Boolean));
-  }, [levelRatioRows]);
+    const ids = new Set(localRatios.map((r) => r.levelId).filter(Boolean));
+    if (editingIndex !== null) {
+      // When editing a row, exclude the original levelId of that row (so it can keep its own)
+      // But we need the draft's value to be allowed
+    }
+    return ids;
+  }, [localRatios, editingIndex]);
 
-  const buildLevelRatios = useCallback((): [number, number][] => {
-    return levelRatioRows
-      .filter((r) => r.levelId && r.ratio)
-      .map((r) => [Number(r.levelId), Number(r.ratio)] as [number, number]);
-  }, [levelRatioRows]);
+  // Ratio sum for display
+  const ratioSum = useMemo(() => {
+    return localRatios.reduce((s, r) => s + (Number(r.ratio) || 0), 0);
+  }, [localRatios]);
 
-  const handleAddRow = useCallback(() => {
-    setLevelRatioRows((prev) => [...prev, { levelId: '', ratio: '' }]);
+  // ── Inline edit handlers ─────────────────────────────────
+  const handleStartEdit = useCallback((index: number) => {
+    setEditingIndex(index);
+    setEditDraft({ ...localRatios[index] });
+    setIsAdding(false);
+    setFormError('');
+  }, [localRatios]);
+
+  const handleConfirmEdit = useCallback(() => {
+    if (editingIndex === null) return;
+    if (!editDraft.levelId || !editDraft.ratio || Number(editDraft.ratio) <= 0) return;
+    setLocalRatios((prev) =>
+      prev.map((row, i) => (i === editingIndex ? { ...editDraft } : row)),
+    );
+    setEditingIndex(null);
+    setEditDraft({ levelId: '', ratio: '' });
+  }, [editingIndex, editDraft]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingIndex(null);
+    setEditDraft({ levelId: '', ratio: '' });
   }, []);
 
-  const handleRemoveRow = useCallback((index: number) => {
-    setLevelRatioRows((prev) => prev.filter((_, i) => i !== index));
+  // ── Delete row ───────────────────────────────────────────
+  const handleDeleteRow = useCallback((index: number) => {
+    if (localRatios.length <= 1) {
+      setFormError(t('errorMinOneLevel'));
+      return;
+    }
+    setLocalRatios((prev) => prev.filter((_, i) => i !== index));
+    if (editingIndex === index) {
+      setEditingIndex(null);
+      setEditDraft({ levelId: '', ratio: '' });
+    } else if (editingIndex !== null && editingIndex > index) {
+      setEditingIndex(editingIndex - 1);
+    }
+  }, [localRatios.length, editingIndex, t]);
+
+  // ── Add row ──────────────────────────────────────────────
+  const handleStartAdd = useCallback(() => {
+    setIsAdding(true);
+    setAddDraft({ levelId: '', ratio: '' });
+    setEditingIndex(null);
+    setFormError('');
   }, []);
 
-  const handleRowChange = useCallback((index: number, field: keyof LevelRatioRow, value: string) => {
-    setLevelRatioRows((prev) => prev.map((row, i) => i === index ? { ...row, [field]: value } : row));
+  const handleConfirmAdd = useCallback(() => {
+    if (!addDraft.levelId || !addDraft.ratio || Number(addDraft.ratio) <= 0) return;
+    setLocalRatios((prev) => [...prev, { ...addDraft }]);
+    setIsAdding(false);
+    setAddDraft({ levelId: '', ratio: '' });
+  }, [addDraft]);
+
+  const handleCancelAdd = useCallback(() => {
+    setIsAdding(false);
+    setAddDraft({ levelId: '', ratio: '' });
   }, []);
 
+  // ── Cancel all changes ───────────────────────────────────
+  const handleCancelChanges = useCallback(() => {
+    const chainRatios = config?.levelRatios ?? [];
+    setLocalRatios(
+      chainRatios.map(([id, ratio]) => ({
+        levelId: String(id),
+        ratio: String(ratio),
+      })),
+    );
+    setRoundDuration('');
+    setEditingIndex(null);
+    setIsAdding(false);
+    setFormError('');
+  }, [config]);
+
+  // ── Save config ──────────────────────────────────────────
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       setFormError('');
-      const ratios = buildLevelRatios();
-      const effectiveRatios = ratios.length > 0 ? ratios : config?.levelRatios ?? [];
-      if (effectiveRatios.length === 0) {
+      const ratios: [number, number][] = localRatios
+        .filter((r) => r.levelId && r.ratio)
+        .map((r) => [Number(r.levelId), Number(r.ratio)]);
+      if (ratios.length === 0) {
         setFormError(t('errorNoLevelRatios'));
         return;
       }
-      const ratioSum = effectiveRatios.reduce((sum, [, r]) => sum + r, 0);
-      if (ratioSum !== 10000) {
-        setFormError(t('errorRatioSumMismatch', { current: ratioSum }));
+      const sum = ratios.reduce((s, [, r]) => s + r, 0);
+      if (sum !== 10000) {
+        setFormError(t('errorRatioSumMismatch', { current: sum }));
         return;
       }
       const dur = Number(roundDuration) || config?.roundDuration || 0;
@@ -149,18 +253,18 @@ function ConfigSection() {
         setFormError(t('errorNoRoundDuration'));
         return;
       }
-      setPoolRewardConfig.mutate([entityId, effectiveRatios, dur]);
+      setPoolRewardConfig.mutate([entityId, ratios, dur]);
     },
-    [entityId, buildLevelRatios, roundDuration, config, setPoolRewardConfig, t],
+    [entityId, localRatios, roundDuration, config, setPoolRewardConfig, t],
   );
 
+  // ── Pause/Resume toggle ──────────────────────────────────
   const handleToggle = useCallback(() => {
     if (config && !isPaused) {
       pausePoolReward.mutate([entityId]);
     } else if (config && isPaused) {
       resumePoolReward.mutate([entityId]);
     }
-    // When not configured, do nothing — user must fill the form and click Save
   }, [entityId, config, isPaused, pausePoolReward, resumePoolReward]);
 
   const isToggleBusy = isTxBusy(pausePoolReward) || isTxBusy(resumePoolReward) || isTxBusy(setPoolRewardConfig);
@@ -181,6 +285,18 @@ function ConfigSection() {
         ? t('paused')
         : t('notConfigured');
 
+  // Available levels for add/edit (exclude already-used ones)
+  const getAvailableLevels = useCallback(
+    (currentLevelId?: string) => {
+      return customLevels.filter(
+        (level) => String(level.id) === currentLevelId || !selectedLevelIds.has(String(level.id)),
+      );
+    },
+    [customLevels, selectedLevelIds],
+  );
+
+  const hasConfig = !!config?.levelRatios && config.levelRatios.length > 0;
+
   return (
     <Card>
       <CardHeader>
@@ -188,6 +304,7 @@ function ConfigSection() {
         <CardDescription>{t('configSectionDesc')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* ── Status summary ── */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t('enableToggle')}</p>
@@ -214,6 +331,7 @@ function ConfigSection() {
         <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
           <Separator className="my-4" />
 
+          {/* ── Pause/Resume ── */}
           <div className="flex items-center gap-3">
             <Switch
               checked={!!config && !isPaused}
@@ -232,14 +350,189 @@ function ConfigSection() {
           <Separator className="my-4" />
 
           <form onSubmit={handleSaveConfig} className="space-y-4">
-            {/* Level ratios rows */}
+            {/* ── Level ratios table ── */}
             <div className="space-y-3">
               <LabelWithTip tip={t('help.levelRatios')}>{t('levelRatios')}</LabelWithTip>
+
               {customLevels.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('noLevelsConfigured')}</p>
-              ) : (
+              ) : hasConfig ? (
+                /* ── Existing config: table with inline edit/delete ── */
                 <>
-                  {levelRatioRows.map((row, index) => {
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/30">
+                          <th className="px-3 py-2 text-left font-medium">{t('levelId')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('ratio')} (bps)</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('actions')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {localRatios.map((row, index) => {
+                          const isRowEditing = editingIndex === index;
+                          if (isRowEditing) {
+                            const available = getAvailableLevels(editDraft.levelId);
+                            return (
+                              <tr key={index} className="border-b last:border-0 bg-accent/50">
+                                <td className="px-3 py-2">
+                                  <Select
+                                    value={editDraft.levelId}
+                                    onValueChange={(v) => setEditDraft((d) => ({ ...d, levelId: v }))}
+                                  >
+                                    <SelectTrigger className="h-8 w-full">
+                                      <SelectValue placeholder={t('selectLevel')} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {available.map((level) => (
+                                        <SelectItem key={level.id} value={String(level.id)}>
+                                          Lv.{level.id} {level.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={10000}
+                                    value={editDraft.ratio}
+                                    onChange={(e) => setEditDraft((d) => ({ ...d, ratio: e.target.value }))}
+                                    className="h-8 w-24 ml-auto text-right"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button type="button" variant="ghost" size="sm" onClick={handleConfirmEdit}>
+                                      {t('confirmEdit')}
+                                    </Button>
+                                    <Button type="button" variant="ghost" size="sm" onClick={handleCancelEdit}>
+                                      {t('cancelEdit')}
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return (
+                            <tr key={index} className="border-b last:border-0">
+                              <td className="px-3 py-2">
+                                <Badge variant="outline">
+                                  Lv{row.levelId}{levelNameById[Number(row.levelId)] ? ` ${levelNameById[Number(row.levelId)]}` : ''}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono">
+                                {row.ratio} <span className="text-muted-foreground text-xs">({bpsToPercent(Number(row.ratio))})</span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleStartEdit(index)}
+                                    disabled={isAdding}
+                                  >
+                                    {t('editRow')}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteRow(index)}
+                                    disabled={isAdding || localRatios.length <= 1}
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    {t('deleteRow')}
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {/* ── Add row (inline) ── */}
+                        {isAdding && (
+                          <tr className="border-b last:border-0 bg-accent/50">
+                            <td className="px-3 py-2">
+                              <Select
+                                value={addDraft.levelId}
+                                onValueChange={(v) => setAddDraft((d) => ({ ...d, levelId: v }))}
+                              >
+                                <SelectTrigger className="h-8 w-full">
+                                  <SelectValue placeholder={t('selectLevel')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {getAvailableLevels().map((level) => (
+                                    <SelectItem key={level.id} value={String(level.id)}>
+                                      Lv.{level.id} {level.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="px-3 py-2">
+                              <Input
+                                type="number"
+                                min={1}
+                                max={10000}
+                                value={addDraft.ratio}
+                                onChange={(e) => setAddDraft((d) => ({ ...d, ratio: e.target.value }))}
+                                placeholder="500"
+                                className="h-8 w-24 ml-auto text-right"
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button type="button" variant="ghost" size="sm" onClick={handleConfirmAdd}>
+                                  {t('confirmEdit')}
+                                </Button>
+                                <Button type="button" variant="ghost" size="sm" onClick={handleCancelAdd}>
+                                  {t('cancelEdit')}
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Add button + ratio sum */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleStartAdd}
+                      disabled={isAdding || editingIndex !== null || localRatios.length >= customLevels.length}
+                    >
+                      {t('addLevelRatio')}
+                    </Button>
+                    {(() => {
+                      const ok = ratioSum === 10000;
+                      return (
+                        <span className={`text-xs font-mono ${ok ? 'text-green-600' : 'text-orange-500'}`}>
+                          {t('ratioSum')}: {ratioSum} / 10000 bps {ok ? '✓' : ''}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Dirty indicator */}
+                  {isDirty && (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{t('unsavedChanges')}</Badge>
+                      <Button type="button" variant="ghost" size="sm" onClick={handleCancelChanges}>
+                        {t('cancelChanges')}
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* ── No config yet: init form with add rows ── */
+                <>
+                  {localRatios.map((row, index) => {
                     const availableLevels = customLevels.filter(
                       (level) => String(level.id) === row.levelId || !selectedLevelIds.has(String(level.id)),
                     );
@@ -247,7 +540,9 @@ function ConfigSection() {
                       <div key={index} className="flex items-end gap-3">
                         <div className="flex-1 space-y-1">
                           {index === 0 && <p className="text-xs text-muted-foreground">{t('levelId')}</p>}
-                          <Select value={row.levelId} onValueChange={(value) => handleRowChange(index, 'levelId', value)}>
+                          <Select value={row.levelId} onValueChange={(value) => {
+                            setLocalRatios((prev) => prev.map((r, i) => i === index ? { ...r, levelId: value } : r));
+                          }}>
                             <SelectTrigger>
                               <SelectValue placeholder={t('selectLevel')} />
                             </SelectTrigger>
@@ -267,7 +562,9 @@ function ConfigSection() {
                             min={0}
                             max={10000}
                             value={row.ratio}
-                            onChange={(e) => handleRowChange(index, 'ratio', e.target.value)}
+                            onChange={(e) => {
+                              setLocalRatios((prev) => prev.map((r, i) => i === index ? { ...r, ratio: e.target.value } : r));
+                            }}
                             placeholder="500"
                           />
                         </div>
@@ -275,8 +572,8 @@ function ConfigSection() {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveRow(index)}
-                          disabled={levelRatioRows.length <= 1}
+                          onClick={() => setLocalRatios((prev) => prev.filter((_, i) => i !== index))}
+                          disabled={localRatios.length <= 1}
                           className="shrink-0"
                         >
                           {t('removeRow')}
@@ -289,13 +586,13 @@ function ConfigSection() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={handleAddRow}
-                      disabled={levelRatioRows.length >= customLevels.length}
+                      onClick={() => setLocalRatios((prev) => [...prev, { levelId: '', ratio: '' }])}
+                      disabled={localRatios.length >= customLevels.length}
                     >
                       {t('addLevelRatio')}
                     </Button>
                     {(() => {
-                      const sum = levelRatioRows.reduce((s, r) => s + (Number(r.ratio) || 0), 0);
+                      const sum = localRatios.reduce((s, r) => s + (Number(r.ratio) || 0), 0);
                       const ok = sum === 10000;
                       return (
                         <span className={`text-xs font-mono ${ok ? 'text-green-600' : 'text-orange-500'}`}>
@@ -308,7 +605,7 @@ function ConfigSection() {
               )}
             </div>
 
-            {/* Round duration */}
+            {/* ── Round duration ── */}
             <div className="max-w-xs space-y-2">
               <LabelWithTip htmlFor="pr-round-duration" tip={t('help.roundDuration')}>{t('roundDuration')}</LabelWithTip>
               <Input
@@ -324,11 +621,12 @@ function ConfigSection() {
               </p>
             </div>
 
+            {/* ── Action buttons ── */}
             <div className="flex flex-wrap items-center gap-3">
               {formError && (
                 <p className="w-full text-sm text-destructive">{formError}</p>
               )}
-              <Button type="submit" disabled={isTxBusy(setPoolRewardConfig)}>
+              <Button type="submit" disabled={isTxBusy(setPoolRewardConfig) || editingIndex !== null || isAdding}>
                 {t('saveConfig')}
               </Button>
               <Button

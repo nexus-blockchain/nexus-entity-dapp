@@ -83,7 +83,7 @@ function ConfigAndTiersSection() {
   const { entityId } = useEntityContext();
   const {
     config, setMultiLevelConfig, clearMultiLevelConfig,
-    addTier, removeTier,
+    addTier, removeTier, updateMultiLevelParams,
   } = useMultiLevelCommission();
   const { customLevels } = useMembers();
 
@@ -91,6 +91,10 @@ function ConfigAndTiersSection() {
 
   // For init mode: accumulate tiers locally before first save
   const [draftTiers, setDraftTiers] = useState<DraftTier[]>([emptyDraft()]);
+
+  // For existing config: inline edit tier
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<DraftTier>(emptyDraft());
 
   // For existing config: single add-tier form
   const [newTier, setNewTier] = useState<DraftTier>(emptyDraft());
@@ -105,6 +109,43 @@ function ConfigAndTiersSection() {
   };
   const handleAddDraftRow = () => setDraftTiers((prev) => [...prev, emptyDraft()]);
   const handleRemoveDraftRow = (index: number) => setDraftTiers((prev) => prev.filter((_, i) => i !== index));
+
+  // ── Start inline edit for an existing tier ──
+  const handleStartEdit = (index: number) => {
+    const tier = tiers[index];
+    if (!tier) return;
+    setEditingIndex(index);
+    setEditDraft({
+      rate: String(tier.rate),
+      requiredDirects: String(tier.requiredDirects),
+      requiredTeamSize: String(tier.requiredTeamSize),
+      requiredSpent: tier.requiredSpent.toString(),
+      requiredLevelId: String(tier.requiredLevelId),
+    });
+  };
+  const handleCancelEdit = () => { setEditingIndex(null); setEditDraft(emptyDraft()); };
+
+  // ── Update single tier via updateMultiLevelParams ──
+  const handleUpdateTier = useCallback(
+    () => {
+      if (editingIndex === null) return;
+      updateMultiLevelParams.mutate([
+        entityId,
+        null, // maxTotalRate: no change
+        editingIndex,
+        {
+          rate: Number(editDraft.rate) || 0,
+          requiredDirects: Number(editDraft.requiredDirects) || 0,
+          requiredTeamSize: Number(editDraft.requiredTeamSize) || 0,
+          requiredSpent: editDraft.requiredSpent.trim() || '0',
+          requiredLevelId: Number(editDraft.requiredLevelId) || 0,
+        },
+      ]);
+      setEditingIndex(null);
+      setEditDraft(emptyDraft());
+    },
+    [entityId, editingIndex, editDraft, updateMultiLevelParams],
+  );
 
   // ── Init save: setMultiLevelConfig with tiers ──
   const handleInitSave = useCallback(
@@ -368,28 +409,91 @@ function ConfigAndTiersSection() {
                 {tiers.map((tier, i) => (
                   <TableRow key={i}>
                     <TableCell className="font-medium">L{i}</TableCell>
-                    <TableCell>{tier.rate} {t('bps')}</TableCell>
-                    <TableCell>{tier.requiredDirects}</TableCell>
-                    <TableCell>{tier.requiredTeamSize}</TableCell>
-                    <TableCell>{formatNex(tier.requiredSpent)} USDT</TableCell>
-                    <TableCell>
-                      {tier.requiredLevelId === 0
-                        ? t('anyLevel')
-                        : (customLevels.find((lv) => lv.id === tier.requiredLevelId)?.name || `#${tier.requiredLevelId}`)}
-                    </TableCell>
-                    <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive"
-                          onClick={() => removeTier.mutate([entityId, i])}
-                          disabled={isTxBusy(removeTier)}
-                        >
-                          {t('removeTier')}
-                        </Button>
-                      </TableCell>
-                    </PermissionGuard>
+                    {editingIndex === i ? (
+                      <>
+                        <TableCell>
+                          <Input type="number" value={editDraft.rate} onChange={(e) => setEditDraft((p) => ({ ...p, rate: e.target.value }))} className="w-24" />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" value={editDraft.requiredDirects} onChange={(e) => setEditDraft((p) => ({ ...p, requiredDirects: e.target.value }))} placeholder="0" className="w-20" />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" value={editDraft.requiredTeamSize} onChange={(e) => setEditDraft((p) => ({ ...p, requiredTeamSize: e.target.value }))} placeholder="0" className="w-20" />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="text" inputMode="decimal" value={editDraft.requiredSpent} onChange={(e) => setEditDraft((p) => ({ ...p, requiredSpent: e.target.value }))} placeholder="0" className="w-28" />
+                        </TableCell>
+                        <TableCell>
+                          <Select value={editDraft.requiredLevelId} onValueChange={(v) => setEditDraft((p) => ({ ...p, requiredLevelId: v }))}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0">{t('anyLevel')}</SelectItem>
+                              {customLevels.map((lv) => (
+                                <SelectItem key={lv.id} value={String(lv.id)}>{lv.name || `#${lv.id}`}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" onClick={handleUpdateTier} disabled={isTxBusy(updateMultiLevelParams)}>
+                                {t('updateTier')}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={handleCancelEdit}>
+                                {t('cancelEdit')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive"
+                                onClick={() => { handleCancelEdit(); removeTier.mutate([entityId, i]); }}
+                                disabled={isTxBusy(removeTier)}
+                              >
+                                {t('removeTier')}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </PermissionGuard>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell>{tier.rate} {t('bps')}</TableCell>
+                        <TableCell>{tier.requiredDirects}</TableCell>
+                        <TableCell>{tier.requiredTeamSize}</TableCell>
+                        <TableCell>{formatNex(tier.requiredSpent)} USDT</TableCell>
+                        <TableCell>
+                          {tier.requiredLevelId === 0
+                            ? t('anyLevel')
+                            : (customLevels.find((lv) => lv.id === tier.requiredLevelId)?.name || `#${tier.requiredLevelId}`)}
+                        </TableCell>
+                        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleStartEdit(i)}
+                                disabled={editingIndex !== null}
+                              >
+                                {t('editTier')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive"
+                                onClick={() => removeTier.mutate([entityId, i])}
+                                disabled={isTxBusy(removeTier)}
+                              >
+                                {t('removeTier')}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </PermissionGuard>
+                      </>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -476,6 +580,7 @@ function ConfigAndTiersSection() {
         <CardFooter className="gap-3">
           <TxStatusIndicator txState={addTier.txState} />
           <TxStatusIndicator txState={removeTier.txState} />
+          <TxStatusIndicator txState={updateMultiLevelParams.txState} />
         </CardFooter>
       </Card>
     </>

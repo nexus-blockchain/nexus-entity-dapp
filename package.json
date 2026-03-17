@@ -62,6 +62,7 @@
     "@scure/sr25519": "^1.0.0"
   },
   "devDependencies": {
+    "@swc/helpers": "^0.5.19",
     "@tauri-apps/cli": "^2.10.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

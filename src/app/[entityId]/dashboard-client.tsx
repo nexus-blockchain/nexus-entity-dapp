@@ -9,6 +9,7 @@ import { useShops } from '@/hooks/use-shops';
 import { useEntityMarket } from '@/hooks/use-entity-market';
 import { useGovernance } from '@/hooks/use-governance';
 import { useCommission } from '@/hooks/use-commission';
+import { useChainConstants } from '@/hooks/use-chain-constants';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
 import { isFundWarning, FUND_WARNING_THRESHOLD } from '@/lib/utils/fund-warning';
 import { useTranslations } from 'next-intl';
@@ -21,7 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import {
   AlertTriangle, Wallet, Users, Coins, BarChart3,
-  Store, Settings, CheckCircle, Shield,
+  Store, Settings, CheckCircle, Shield, Landmark,
   ArrowRight, Package, Activity, Scale, FileText, Star,
   Zap, Eye, CircleDollarSign, Gavel,
 } from 'lucide-react';
@@ -642,6 +643,7 @@ export function DashboardPage() {
   const { memberCount, isLoading: membersLoading } = useMembers();
   const { tokenConfig, isLoading: tokenLoading } = useEntityToken();
   const { shops, isLoading: shopsLoading } = useShops();
+  const { entityRegistry, isLoading: constantsLoading } = useChainConstants();
 
   const hasGovernance = governanceMode === 'FullDAO';
   const hasMarket = visibleModules.includes('market');
@@ -651,8 +653,8 @@ export function DashboardPage() {
     return (
       <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
         <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-28 w-full" />)}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-28 w-full" />)}
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {[1, 2].map((i) => <Skeleton key={i} className="h-52 w-full" />)}
@@ -727,7 +729,15 @@ export function DashboardPage() {
       </Card>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          label={t('initialFund')}
+          value={constantsLoading || !entityRegistry
+            ? '--'
+            : t('initialFundUsdt', { amount: (Number(entityRegistry.initialFundUsdt) / 1_000_000).toString() })}
+          icon={<Landmark className="h-4 w-4" />}
+          loading={constantsLoading}
+        />
         <StatCard
           label={t('fundBalance')}
           value={`${formatNex(entity.fundBalance)} NEX`}

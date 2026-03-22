@@ -1,14 +1,21 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
-import type { TxState } from '@/lib/types/models';
+import type { TxState, PluginBudgetCaps } from '@/lib/types/models';
 import { CommissionPlugin, WithdrawalModeType } from '@/lib/types/enums';
 import { useCommission } from '@/hooks/use-commission';
+import { useReferralCommission } from '@/hooks/use-referral-commission';
+import { useMultiLevelCommission } from '@/hooks/use-multi-level-commission';
+import { useLevelDiffCommission } from '@/hooks/use-level-diff-commission';
+import { useSingleLineCommission } from '@/hooks/use-single-line-commission';
+import { useTeamCommission } from '@/hooks/use-team-commission';
+import { usePoolRewardCommission } from '@/hooks/use-pool-reward-commission';
+import { useMembers } from '@/hooks/use-members';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useTranslations } from 'next-intl';
 import { formatNex, formatToken } from '@/lib/utils/format';
@@ -551,13 +558,48 @@ function MemberStatsSection() {
 
 // ─── Plugin Config Section ──────────────────────────────────
 
+type PluginCapKey = 'referralCap' | 'multiLevelCap' | 'levelDiffCap' | 'singleLineCap' | 'teamCap';
+
+const PLUGIN_CAP_MAP: Record<string, PluginCapKey | null> = {
+  [CommissionPlugin.Referral]: 'referralCap',
+  [CommissionPlugin.MultiLevel]: 'multiLevelCap',
+  [CommissionPlugin.LevelDiff]: 'levelDiffCap',
+  [CommissionPlugin.SingleLine]: 'singleLineCap',
+  [CommissionPlugin.Team]: 'teamCap',
+  [CommissionPlugin.PoolReward]: null,
+};
+
 function PluginSection() {
   const t = useTranslations('commission');
   const tc = useTranslations('common');
   const te = useTranslations('enums');
   const { entityId } = useEntityContext();
-  const { coreConfig, config, setCommissionModes } = useCommission();
+  const { coreConfig, config, setCommissionModes, setPluginBudgetCaps } = useCommission();
   const enabledModes = coreConfig?.enabledModes ?? config?.enabledModes ?? 0;
+
+  // Budget caps local state - initialized from chain
+  const [caps, setCaps] = useState<Record<PluginCapKey, string>>({
+    referralCap: '',
+    multiLevelCap: '',
+    levelDiffCap: '',
+    singleLineCap: '',
+    teamCap: '',
+  });
+  const capsInitRef = useRef(false);
+
+  useEffect(() => {
+    if (coreConfig?.pluginBudgetCaps && !capsInitRef.current) {
+      capsInitRef.current = true;
+      const bc = coreConfig.pluginBudgetCaps;
+      setCaps({
+        referralCap: bc.referralCap > 0 ? String(bc.referralCap) : '',
+        multiLevelCap: bc.multiLevelCap > 0 ? String(bc.multiLevelCap) : '',
+        levelDiffCap: bc.levelDiffCap > 0 ? String(bc.levelDiffCap) : '',
+        singleLineCap: bc.singleLineCap > 0 ? String(bc.singleLineCap) : '',
+        teamCap: bc.teamCap > 0 ? String(bc.teamCap) : '',
+      });
+    }
+  }, [coreConfig?.pluginBudgetCaps]);
 
   const handleToggle = useCallback(
     (_plugin: CommissionPlugin, bit: number) => {
@@ -567,44 +609,445 @@ function PluginSection() {
     [entityId, enabledModes, setCommissionModes],
   );
 
+  const handleSaveCaps = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setPluginBudgetCaps.mutate([
+        entityId,
+        {
+          referralCap: Number(caps.referralCap) || 0,
+          multiLevelCap: Number(caps.multiLevelCap) || 0,
+          levelDiffCap: Number(caps.levelDiffCap) || 0,
+          singleLineCap: Number(caps.singleLineCap) || 0,
+          teamCap: Number(caps.teamCap) || 0,
+        },
+      ]);
+    },
+    [entityId, caps, setPluginBudgetCaps],
+  );
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg">{t('pluginConfig')}</CardTitle>
         <CardDescription>{t('pluginConfigDesc')}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {PLUGIN_LIST.map(({ key, bit, route }) => {
-            const isEnabled = (enabledModes & bit) !== 0;
-            return (
-              <Card key={key} className="shadow-none">
-                <CardContent className="flex items-center justify-between p-4">
-                  <div className="space-y-0.5">
-                    <p className="text-sm font-medium">{te(`commissionPlugin.${key}`)}</p>
-                    <p className="text-xs text-muted-foreground">{key}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link href={`/${entityId}/commission/${route}`}>
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                        {tc('viewDetails')}
-                      </Button>
-                    </Link>
-                    <Switch
-                      checked={isEnabled}
-                      onCheckedChange={() => handleToggle(key, bit)}
-                      disabled={isTxBusy(setCommissionModes)}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+      <CardContent className="space-y-4">
+        <form onSubmit={handleSaveCaps}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {PLUGIN_LIST.map(({ key, bit, route }) => {
+              const isEnabled = (enabledModes & bit) !== 0;
+              const capKey = PLUGIN_CAP_MAP[key];
+              const capValue = capKey ? caps[capKey] : '';
+              const chainCap = capKey ? (coreConfig?.pluginBudgetCaps?.[capKey] ?? 0) : 0;
+              return (
+                <Card key={key} className={`shadow-none transition-colors ${isEnabled ? 'border-primary/40 bg-primary/5' : 'opacity-60'}`}>
+                  <CardContent className="space-y-3 p-4">
+                    {/* Header row: name + toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <p className="text-sm font-medium">{te(`commissionPlugin.${key}`)}</p>
+                        <p className="text-xs text-muted-foreground">{key}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link href={`/${entityId}/commission/${route}`}>
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                            {tc('viewDetails')}
+                          </Button>
+                        </Link>
+                        <Switch
+                          checked={isEnabled}
+                          onCheckedChange={() => handleToggle(key, bit)}
+                          disabled={isTxBusy(setCommissionModes)}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Budget cap input */}
+                    {isEnabled && capKey && (
+                      <div className="space-y-1.5">
+                        <LabelWithTip htmlFor={`cap-${capKey}`} tip={t('help.pluginBudgetCap')}>
+                          {t('pluginBudgetCap')}
+                        </LabelWithTip>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id={`cap-${capKey}`}
+                            type="number"
+                            min={0}
+                            max={10000}
+                            value={capValue}
+                            onChange={(e) => setCaps((prev) => ({ ...prev, [capKey]: e.target.value }))}
+                            placeholder={t('noCap')}
+                            className="h-8 text-sm"
+                          />
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">
+                            {capValue && Number(capValue) > 0
+                              ? `${(Number(capValue) / 100).toFixed(2)}%`
+                              : t('noCap')}
+                          </span>
+                        </div>
+                        {chainCap > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            {t('current')}: {bpsDisplay(chainCap)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <Button type="submit" disabled={isTxBusy(setPluginBudgetCaps)}>
+              {t('saveBudgetCaps')}
+            </Button>
+            <TxStatusIndicator txState={setPluginBudgetCaps.txState} />
+          </div>
+        </form>
       </CardContent>
       <CardFooter className="gap-3">
         <TxStatusIndicator txState={setCommissionModes.txState} />
       </CardFooter>
+    </Card>
+  );
+}
+
+// ─── Commission Preview Section ─────────────────────────────
+
+function CommissionPreviewSection() {
+  const t = useTranslations('commission');
+  const te = useTranslations('enums');
+  const { coreConfig, config } = useCommission();
+  const referral = useReferralCommission();
+  const multiLevel = useMultiLevelCommission();
+  const levelDiff = useLevelDiffCommission();
+  const singleLine = useSingleLineCommission();
+  const team = useTeamCommission();
+  const poolReward = usePoolRewardCommission();
+
+  const [orderAmount, setOrderAmount] = useState('10000');
+  const enabledModes = coreConfig?.enabledModes ?? config?.enabledModes ?? 0;
+  const maxRate = coreConfig?.maxCommissionRate ?? 0;
+  const creatorRate = coreConfig?.creatorRewardRate ?? 0;
+  const budgetCaps = coreConfig?.pluginBudgetCaps;
+
+  const amount = Number(orderAmount) || 0;
+
+  // Compute Pool B
+  const poolB = amount * maxRate / 10000;
+  const creatorReward = poolB * creatorRate / 10000;
+  const pluginBudget = poolB - creatorReward;
+
+  // Plugin info with caps
+  type PluginPreviewInfo = {
+    key: CommissionPlugin;
+    bit: number;
+    capKey: PluginCapKey | null;
+    cap: number;
+    budget: number;
+    rates: { label: string; value: string }[];
+    theoreticalMax: number;
+  };
+
+  const pluginInfos: PluginPreviewInfo[] = [];
+  let usedBudget = 0;
+
+  // Build plugin info for each enabled plugin
+  for (const { key, bit } of PLUGIN_LIST) {
+    if ((enabledModes & bit) === 0) continue;
+    const capKey = PLUGIN_CAP_MAP[key];
+    const capBps = capKey ? (budgetCaps?.[capKey] ?? 0) : 0;
+    const capAmount = capBps > 0 ? amount * capBps / 10000 : pluginBudget;
+    const effectiveBudget = Math.min(pluginBudget - usedBudget, capAmount);
+    const rates: { label: string; value: string }[] = [];
+    let theoreticalMax = 0;
+
+    switch (key) {
+      case CommissionPlugin.Referral: {
+        const rc = referral.config;
+        if (rc) {
+          if (rc.rewardRate > 0) {
+            rates.push({ label: t('directRewardRate'), value: bpsDisplay(rc.rewardRate) });
+            theoreticalMax += amount * rc.rewardRate / 10000;
+          }
+        }
+        break;
+      }
+      case CommissionPlugin.MultiLevel: {
+        const mc = multiLevel.config;
+        if (mc) {
+          mc.tiers.forEach((tier, i) => {
+            rates.push({ label: `L${i}`, value: bpsDisplay(tier.rate) });
+            theoreticalMax += amount * tier.rate / 10000;
+          });
+          if (mc.maxTotalRate > 0) {
+            rates.push({ label: 'maxTotalRate', value: bpsDisplay(mc.maxTotalRate) });
+          }
+        }
+        break;
+      }
+      case CommissionPlugin.LevelDiff: {
+        const ldc = levelDiff.config;
+        if (ldc) {
+          ldc.levelRates.forEach((rate, i) => {
+            rates.push({ label: `L${i}`, value: bpsDisplay(rate) });
+          });
+          // Level diff uses differential: max payout = highest level rate
+          const maxLevelRate = ldc.levelRates.length > 0
+            ? Math.max(...ldc.levelRates)
+            : 0;
+          theoreticalMax = amount * maxLevelRate / 10000;
+        }
+        break;
+      }
+      case CommissionPlugin.SingleLine: {
+        const slc = singleLine.config;
+        if (slc) {
+          rates.push({ label: t('uplineRate'), value: bpsDisplay(slc.uplineRate) });
+          rates.push({ label: t('downlineRate'), value: bpsDisplay(slc.downlineRate) });
+          rates.push({ label: t('uplineLevels'), value: `${slc.baseUplineLevels} (max ${slc.maxUplineLevels})` });
+          rates.push({ label: t('downlineLevels'), value: `${slc.baseDownlineLevels} (max ${slc.maxDownlineLevels})` });
+          theoreticalMax = amount * (slc.uplineRate * slc.maxUplineLevels + slc.downlineRate * slc.maxDownlineLevels) / 10000;
+        }
+        break;
+      }
+      case CommissionPlugin.Team: {
+        const tc2 = team.config;
+        if (tc2) {
+          tc2.tiers.forEach((tier) => {
+            rates.push({
+              label: `Tier ${tier.tier}`,
+              value: `${bpsDisplay(tier.rate)} (${t('minDirectCount')}: ${tier.minDirectCount})`,
+            });
+          });
+          // Highest tier rate is theoretical max
+          const maxTierRate = tc2.tiers.length > 0
+            ? Math.max(...tc2.tiers.map((tier) => tier.rate))
+            : 0;
+          theoreticalMax = amount * maxTierRate / 10000;
+        }
+        break;
+      }
+      case CommissionPlugin.PoolReward: {
+        const prc = poolReward.config;
+        if (prc) {
+          prc.levelRatios.forEach(([level, ratio]) => {
+            rates.push({ label: `${t('levelRatio')} L${level}`, value: `${ratio / 100}%` });
+          });
+          if (prc.roundDuration > 0) {
+            rates.push({ label: t('roundDuration'), value: `${prc.roundDuration} blocks` });
+          }
+          // Pool reward distributes from unallocated pool, theoretical max is the cap or budget
+          theoreticalMax = effectiveBudget;
+        }
+        break;
+      }
+    }
+
+    const finalBudget = Math.min(effectiveBudget, theoreticalMax > 0 ? theoreticalMax : effectiveBudget);
+    usedBudget += capBps > 0 ? Math.min(capAmount, pluginBudget) : 0;
+
+    pluginInfos.push({
+      key,
+      bit,
+      capKey,
+      cap: capBps,
+      budget: finalBudget,
+      rates,
+      theoreticalMax,
+    });
+  }
+
+  const totalPluginUsed = pluginInfos.reduce((sum, p) => sum + p.budget, 0);
+  const unallocated = pluginBudget - totalPluginUsed;
+
+  // Colors for the visual bar
+  const BAR_COLORS = [
+    'bg-blue-500', 'bg-green-500', 'bg-yellow-500',
+    'bg-purple-500', 'bg-pink-500', 'bg-orange-500',
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('commissionPreview')}</CardTitle>
+        <CardDescription>{t('commissionPreviewDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Input */}
+        <div className="flex items-end gap-3">
+          <div className="space-y-2">
+            <LabelWithTip htmlFor="preview-amount" tip={t('help.simulatedOrderAmount')}>
+              {t('simulatedOrderAmount')}
+            </LabelWithTip>
+            <Input
+              id="preview-amount"
+              type="number"
+              min={0}
+              value={orderAmount}
+              onChange={(e) => setOrderAmount(e.target.value)}
+              placeholder="10000"
+              className="w-48"
+            />
+          </div>
+        </div>
+
+        {amount > 0 && (
+          <>
+            {/* Overview cards */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Card className="shadow-none">
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">{t('effectiveRate')}</p>
+                  <p className="text-lg font-semibold">{(maxRate / 100).toFixed(2)}%</p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-none">
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">{t('poolBTotal')}</p>
+                  <p className="text-lg font-semibold">{poolB.toFixed(2)} USDT</p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-none">
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">{t('creatorReward')} ({(creatorRate / 100).toFixed(1)}%)</p>
+                  <p className="text-lg font-semibold">{creatorReward.toFixed(2)} USDT</p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-none">
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">{t('pluginBudget')}</p>
+                  <p className="text-lg font-semibold">{pluginBudget.toFixed(2)} USDT</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Visual budget bar */}
+            {pluginInfos.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">{t('rateBreakdown')}</p>
+                <div className="flex h-6 w-full overflow-hidden rounded-md">
+                  {/* Creator portion */}
+                  {creatorReward > 0 && (
+                    <div
+                      className="bg-slate-400 flex items-center justify-center text-[10px] text-white"
+                      style={{ width: `${(creatorReward / poolB) * 100}%` }}
+                      title={`Creator: ${creatorReward.toFixed(2)}`}
+                    />
+                  )}
+                  {pluginInfos.map((p, i) => {
+                    const pct = poolB > 0 ? (p.budget / poolB) * 100 : 0;
+                    if (pct < 0.5) return null;
+                    return (
+                      <div
+                        key={p.key}
+                        className={`${BAR_COLORS[i % BAR_COLORS.length]} flex items-center justify-center text-[10px] text-white`}
+                        style={{ width: `${pct}%` }}
+                        title={`${p.key}: ${p.budget.toFixed(2)}`}
+                      />
+                    );
+                  })}
+                  {unallocated > 0 && (
+                    <div
+                      className="bg-muted flex items-center justify-center text-[10px] text-muted-foreground"
+                      style={{ width: `${(unallocated / poolB) * 100}%` }}
+                      title={`Unallocated: ${unallocated.toFixed(2)}`}
+                    />
+                  )}
+                </div>
+                {/* Legend */}
+                <div className="flex flex-wrap gap-3 text-xs">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-slate-400" />
+                    Creator
+                  </span>
+                  {pluginInfos.map((p, i) => (
+                    <span key={p.key} className="flex items-center gap-1">
+                      <span className={`inline-block h-2.5 w-2.5 rounded-sm ${BAR_COLORS[i % BAR_COLORS.length]}`} />
+                      {te(`commissionPlugin.${p.key}`)}
+                    </span>
+                  ))}
+                  {unallocated > 0 && (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-2.5 w-2.5 rounded-sm bg-muted border" />
+                      {t('unallocatedToPool')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Plugin detail breakdown */}
+            {pluginInfos.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('noPluginsEnabled')}</p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground">{t('pluginDetail')}</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[140px]">Plugin</TableHead>
+                      <TableHead>{t('budgetCap')}</TableHead>
+                      <TableHead>{t('theoreticalMax')}</TableHead>
+                      <TableHead>{t('rateBreakdown')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pluginInfos.map((p) => (
+                      <TableRow key={p.key}>
+                        <TableCell className="font-medium">
+                          {te(`commissionPlugin.${p.key}`)}
+                        </TableCell>
+                        <TableCell>
+                          {p.cap > 0 ? (
+                            <span>{bpsDisplay(p.cap)} = {(amount * p.cap / 10000).toFixed(2)} USDT</span>
+                          ) : (
+                            <span className="text-muted-foreground">{t('noCap')}</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {p.theoreticalMax > 0 ? `${p.theoreticalMax.toFixed(2)} USDT` : '-'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-0.5">
+                            {p.rates.map((r, i) => (
+                              <div key={i} className="text-xs">
+                                <span className="text-muted-foreground">{r.label}: </span>
+                                <span className="font-mono">{r.value}</span>
+                              </div>
+                            ))}
+                            {p.rates.length === 0 && (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {/* Unallocated row */}
+                    {unallocated > 0 && (
+                      <TableRow>
+                        <TableCell className="font-medium text-muted-foreground">
+                          {t('unallocatedToPool')}
+                        </TableCell>
+                        <TableCell colSpan={3}>
+                          {unallocated.toFixed(2)} USDT ({(unallocated / poolB * 100).toFixed(1)}%)
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {/* Note */}
+            <p className="text-xs text-muted-foreground italic">
+              {t('previewNote')}
+            </p>
+          </>
+        )}
+      </CardContent>
     </Card>
   );
 }
@@ -626,6 +1069,7 @@ function WithdrawalConfigSection() {
     clearTokenWithdrawalConfig,
     setMinWithdrawalInterval,
   } = useCommission();
+  const { customLevels } = useMembers();
 
   // NEX form state
   const [nexMode, setNexMode] = useState<WithdrawalModeType>(WithdrawalModeType.FullWithdrawal);
@@ -647,8 +1091,65 @@ function WithdrawalConfigSection() {
   const [tokenEnabled, setTokenEnabled] = useState(true);
   const [tokenOverrides, setTokenOverrides] = useState<{ level: string; withdrawalRate: string; repurchaseRate: string }[]>([]);
 
+  // Pre-populate NEX form from chain state
+  const nexSyncRef = useRef<string | null>(null);
+  useEffect(() => {
+    console.log('[WithdrawalConfig] NEX sync effect, withdrawalConfig:', withdrawalConfig);
+    if (!withdrawalConfig) return;
+    const key = JSON.stringify(withdrawalConfig);
+    if (nexSyncRef.current === key) return;
+    nexSyncRef.current = key;
+    console.log('[WithdrawalConfig] Syncing NEX form, mode:', withdrawalConfig.mode.type, 'overrides:', withdrawalConfig.levelOverrides.length);
+    setNexMode(withdrawalConfig.mode.type as WithdrawalModeType);
+    if (withdrawalConfig.mode.type === 'FixedRate') setNexFixedRepurchaseRate(String(withdrawalConfig.mode.repurchaseRate));
+    if (withdrawalConfig.mode.type === 'MemberChoice') setNexMinRepurchaseRate(String(withdrawalConfig.mode.minRepurchaseRate));
+    setNexWithdrawalRate(String(withdrawalConfig.defaultTier.withdrawalRate));
+    setNexRepurchaseRate(String(withdrawalConfig.defaultTier.repurchaseRate));
+    setNexVoluntaryBonus(String(withdrawalConfig.voluntaryBonusRate));
+    setNexEnabled(withdrawalConfig.enabled);
+    setNexOverrides(
+      withdrawalConfig.levelOverrides.map(([lv, tier]) => ({
+        level: String(lv),
+        withdrawalRate: String(tier.withdrawalRate),
+        repurchaseRate: String(tier.repurchaseRate),
+      })),
+    );
+  }, [withdrawalConfig]);
+
+  // Pre-populate Token form from chain state
+  const tokenSyncRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tokenWithdrawalConfig) return;
+    const key = JSON.stringify(tokenWithdrawalConfig);
+    if (tokenSyncRef.current === key) return;
+    tokenSyncRef.current = key;
+    setTokenMode(tokenWithdrawalConfig.mode.type as WithdrawalModeType);
+    if (tokenWithdrawalConfig.mode.type === 'FixedRate') setTokenFixedRepurchaseRate(String(tokenWithdrawalConfig.mode.repurchaseRate));
+    if (tokenWithdrawalConfig.mode.type === 'MemberChoice') setTokenMinRepurchaseRate(String(tokenWithdrawalConfig.mode.minRepurchaseRate));
+    setTokenWithdrawalRate(String(tokenWithdrawalConfig.defaultTier.withdrawalRate));
+    setTokenRepurchaseRate(String(tokenWithdrawalConfig.defaultTier.repurchaseRate));
+    setTokenVoluntaryBonus(String(tokenWithdrawalConfig.voluntaryBonusRate));
+    setTokenEnabled(tokenWithdrawalConfig.enabled);
+    setTokenOverrides(
+      tokenWithdrawalConfig.levelOverrides.map(([lv, tier]) => ({
+        level: String(lv),
+        withdrawalRate: String(tier.withdrawalRate),
+        repurchaseRate: String(tier.repurchaseRate),
+      })),
+    );
+  }, [tokenWithdrawalConfig]);
+
   // Min withdrawal interval
   const [intervalValue, setIntervalValue] = useState('');
+
+  // Pre-populate interval from chain state
+  const intervalSyncRef = useRef(false);
+  useEffect(() => {
+    if (intervalSyncRef.current) return;
+    if (minWithdrawalInterval === undefined || minWithdrawalInterval === null) return;
+    intervalSyncRef.current = true;
+    setIntervalValue(String(minWithdrawalInterval));
+  }, [minWithdrawalInterval]);
 
   const buildWithdrawalMode = (
     mode: WithdrawalModeType,
@@ -668,7 +1169,6 @@ function WithdrawalConfigSection() {
   };
 
   const buildOverrides = (overrides: { level: string; withdrawalRate: string; repurchaseRate: string }[]) => {
-    if (overrides.length === 0) return null;
     return overrides.map((o) => [
       Number(o.level) || 0,
       {
@@ -713,7 +1213,6 @@ function WithdrawalConfigSection() {
       e.preventDefault();
       if (!intervalValue.trim()) return;
       setMinWithdrawalInterval.mutate([entityId, Number(intervalValue)]);
-      setIntervalValue('');
     },
     [entityId, intervalValue, setMinWithdrawalInterval],
   );
@@ -725,7 +1224,7 @@ function WithdrawalConfigSection() {
         <p className="font-medium">{label}</p>
         <div className="grid grid-cols-2 gap-2 text-xs">
           <span className="text-muted-foreground">{t('withdrawalMode')}:</span>
-          <span>{cfg.mode.type}{cfg.mode.type === 'FixedRate' ? ` (${cfg.mode.repurchaseRate})` : ''}{cfg.mode.type === 'MemberChoice' ? ` (min: ${cfg.mode.minRepurchaseRate})` : ''}</span>
+          <span>{t(`withdrawalMode${cfg.mode.type}`)}{cfg.mode.type === 'FixedRate' ? ` (${cfg.mode.repurchaseRate})` : ''}{cfg.mode.type === 'MemberChoice' ? ` (min: ${cfg.mode.minRepurchaseRate})` : ''}</span>
           <span className="text-muted-foreground">{t('defaultTier')}:</span>
           <span>{cfg.defaultTier.withdrawalRate} / {cfg.defaultTier.repurchaseRate}</span>
           <span className="text-muted-foreground">{t('voluntaryBonusRate')}:</span>
@@ -777,76 +1276,149 @@ function WithdrawalConfigSection() {
   const renderOverridesEditor = (
     overrides: { level: string; withdrawalRate: string; repurchaseRate: string }[],
     setOverrides: React.Dispatch<React.SetStateAction<{ level: string; withdrawalRate: string; repurchaseRate: string }[]>>,
-  ) => (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>{t('levelOverrides')}</Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setOverrides([...overrides, { level: '', withdrawalRate: '', repurchaseRate: '' }])}
-        >
-          {t('addOverride')}
-        </Button>
-      </div>
-      {overrides.map((o, idx) => (
-        <div key={idx} className="flex items-end gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs">Level</Label>
-            <Input
-              type="number"
-              value={o.level}
-              onChange={(e) => {
-                const updated = [...overrides];
-                updated[idx] = { ...updated[idx], level: e.target.value };
-                setOverrides(updated);
+  ) => {
+    // level IDs already used in current overrides
+    const usedLevelIds = new Set(overrides.map((o) => Number(o.level)).filter(Boolean));
+    // available levels to add (not yet used)
+    const availableLevels = customLevels.filter((lv) => !usedLevelIds.has(lv.id));
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>{t('levelOverrides')}</Label>
+          {customLevels.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={availableLevels.length === 0}
+              onClick={() => {
+                const next = availableLevels[0];
+                if (next) setOverrides([...overrides, { level: String(next.id), withdrawalRate: '', repurchaseRate: '' }]);
               }}
-              className="w-20"
-              placeholder="0"
-            />
-          </div>
-          <div className="space-y-1">
-            <LabelWithTip className="text-xs" tip={t('help.withdrawalRate')}>{t('withdrawalRate')}</LabelWithTip>
-            <Input
-              type="number"
-              value={o.withdrawalRate}
-              onChange={(e) => {
-                const updated = [...overrides];
-                updated[idx] = { ...updated[idx], withdrawalRate: e.target.value };
-                setOverrides(updated);
-              }}
-              className="w-24"
-              placeholder="bps"
-            />
-          </div>
-          <div className="space-y-1">
-            <LabelWithTip className="text-xs" tip={t('help.repurchaseRate')}>{t('repurchaseRate')}</LabelWithTip>
-            <Input
-              type="number"
-              value={o.repurchaseRate}
-              onChange={(e) => {
-                const updated = [...overrides];
-                updated[idx] = { ...updated[idx], repurchaseRate: e.target.value };
-                setOverrides(updated);
-              }}
-              className="w-24"
-              placeholder="bps"
-            />
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            onClick={() => setOverrides(overrides.filter((_, i) => i !== idx))}
-          >
-            {t('removeOverride')}
-          </Button>
+            >
+              {t('addOverride')}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setOverrides([...overrides, { level: '', withdrawalRate: '', repurchaseRate: '' }])}
+            >
+              {t('addOverride')}
+            </Button>
+          )}
         </div>
-      ))}
-    </div>
-  );
+        {customLevels.length === 0 && overrides.length === 0 && (
+          <p className="text-xs text-muted-foreground">{t('noCustomLevelsHint')}</p>
+        )}
+        {overrides.map((o, idx) => {
+          const wVal = Number(o.withdrawalRate) || 0;
+          const rVal = Number(o.repurchaseRate) || 0;
+          const sum = wVal + rVal;
+          const sumValid = o.withdrawalRate === '' && o.repurchaseRate === '' ? true : sum === 10000;
+          return (
+          <div key={idx} className="space-y-1">
+            <div className="flex items-end gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Level</Label>
+              {customLevels.length > 0 ? (
+                <Select
+                  value={o.level}
+                  onValueChange={(v) => {
+                    const updated = [...overrides];
+                    updated[idx] = { ...updated[idx], level: v };
+                    setOverrides(updated);
+                  }}
+                >
+                  <SelectTrigger className="w-36">
+                    <SelectValue placeholder="Select level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customLevels.map((lv) => {
+                      const inUse = usedLevelIds.has(lv.id) && String(lv.id) !== o.level;
+                      return (
+                        <SelectItem key={lv.id} value={String(lv.id)} disabled={inUse}>
+                          L{lv.id} {lv.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  type="number"
+                  value={o.level}
+                  onChange={(e) => {
+                    const updated = [...overrides];
+                    updated[idx] = { ...updated[idx], level: e.target.value };
+                    setOverrides(updated);
+                  }}
+                  className="w-20"
+                  placeholder="0"
+                />
+              )}
+            </div>
+            <div className="space-y-1">
+              <LabelWithTip className="text-xs" tip={t('help.withdrawalRate')}>{t('withdrawalRate')}</LabelWithTip>
+              <Input
+                type="number"
+                value={o.withdrawalRate}
+                onChange={(e) => {
+                  const updated = [...overrides];
+                  const v = e.target.value;
+                  const n = Number(v);
+                  updated[idx] = {
+                    ...updated[idx],
+                    withdrawalRate: v,
+                    repurchaseRate: v !== '' && n >= 0 && n <= 10000 ? String(10000 - n) : updated[idx].repurchaseRate,
+                  };
+                  setOverrides(updated);
+                }}
+                className={`w-24 ${!sumValid ? 'border-destructive' : ''}`}
+                placeholder="bps"
+              />
+            </div>
+            <div className="space-y-1">
+              <LabelWithTip className="text-xs" tip={t('help.repurchaseRate')}>{t('repurchaseRate')}</LabelWithTip>
+              <Input
+                type="number"
+                value={o.repurchaseRate}
+                onChange={(e) => {
+                  const updated = [...overrides];
+                  const v = e.target.value;
+                  const n = Number(v);
+                  updated[idx] = {
+                    ...updated[idx],
+                    repurchaseRate: v,
+                    withdrawalRate: v !== '' && n >= 0 && n <= 10000 ? String(10000 - n) : updated[idx].withdrawalRate,
+                  };
+                  setOverrides(updated);
+                }}
+                className={`w-24 ${!sumValid ? 'border-destructive' : ''}`}
+                placeholder="bps"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
+              onClick={() => setOverrides(overrides.filter((_, i) => i !== idx))}
+            >
+              {t('removeOverride')}
+            </Button>
+            </div>
+            {!sumValid && (
+              <p className="text-xs text-destructive">{t('tierSumNote')} ({t('current')}: {sum})</p>
+            )}
+          </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderConfigForm = (
     prefix: 'nex' | 'token',
@@ -879,10 +1451,10 @@ function WithdrawalConfigSection() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={WithdrawalModeType.FullWithdrawal}>{t('withdrawalModes.FullWithdrawal')}</SelectItem>
-            <SelectItem value={WithdrawalModeType.FixedRate}>{t('withdrawalModes.FixedRate')}</SelectItem>
-            <SelectItem value={WithdrawalModeType.LevelBased}>{t('withdrawalModes.LevelBased')}</SelectItem>
-            <SelectItem value={WithdrawalModeType.MemberChoice}>{t('withdrawalModes.MemberChoice')}</SelectItem>
+            <SelectItem value={WithdrawalModeType.FullWithdrawal}>{t('withdrawalModeFullWithdrawal')}</SelectItem>
+            <SelectItem value={WithdrawalModeType.FixedRate}>{t('withdrawalModeFixedRate')}</SelectItem>
+            <SelectItem value={WithdrawalModeType.LevelBased}>{t('withdrawalModeLevelBased')}</SelectItem>
+            <SelectItem value={WithdrawalModeType.MemberChoice}>{t('withdrawalModeMemberChoice')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -899,7 +1471,12 @@ function WithdrawalConfigSection() {
             <Input
               type="number"
               value={wRate}
-              onChange={(e) => setWRate(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                const n = Number(v);
+                setWRate(v);
+                if (v !== '' && n >= 0 && n <= 10000) setRRate(String(10000 - n));
+              }}
               placeholder="10000"
               className="w-28"
             />
@@ -909,7 +1486,12 @@ function WithdrawalConfigSection() {
             <Input
               type="number"
               value={rRate}
-              onChange={(e) => setRRate(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                const n = Number(v);
+                setRRate(v);
+                if (v !== '' && n >= 0 && n <= 10000) setWRate(String(10000 - n));
+              }}
               placeholder="0"
               className="w-28"
             />
@@ -986,9 +1568,6 @@ function WithdrawalConfigSection() {
         <form onSubmit={handleSetInterval} className="flex items-end gap-3">
           <div className="space-y-2">
             <LabelWithTip tip={t('help.minWithdrawalInterval')}>{t('minWithdrawalInterval')}</LabelWithTip>
-            <p className="text-xs text-muted-foreground">
-              {t('minWithdrawalInterval')}: {minWithdrawalInterval} blocks
-            </p>
             <Input
               type="number"
               value={intervalValue}
@@ -1747,6 +2326,7 @@ export function CommissionPage() {
 
       <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
         <PluginSection />
+        <CommissionPreviewSection />
         <WithdrawalConfigSection />
       </PermissionGuard>
 

@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Pencil, Check, X } from 'lucide-react';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -46,6 +47,12 @@ function formatNexBalance(balance: bigint): string {
   const decStr = remainder.toString().padStart(12, '0').slice(0, 4);
   const trimmed = decStr.replace(/0+$/, '');
   return trimmed ? `${whole.toLocaleString()}.${trimmed}` : whole.toLocaleString();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────
+
+function isTxBusy(m: { txState: { status: string } }): boolean {
+  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
 }
 
 // ─── Loading Skeleton ────────────────────────────────────────
@@ -290,9 +297,12 @@ export function ShopDetailPage() {
   const params = useParams();
   const shopId = Number(params.shopId);
   const { isReadOnly, isSuspended, entityId } = useEntityContext();
-  const { getShop, isLoading, error } = useShops();
+  const { getShop, isLoading, error, updateShop } = useShops();
 
   const shop = getShop(shopId);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState('');
 
   // Query points config separately from entityLoyalty pallet
   const pointsConfigQuery = useEntityQuery<ShopPointsConfig | null>(
@@ -348,7 +358,65 @@ export function ShopDetailPage() {
       <Card>
         <CardHeader className="flex-row items-start justify-between space-y-0">
           <div className="space-y-1">
-            <CardTitle className="text-lg">{shop.name}</CardTitle>
+            {isEditingName ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="h-8 w-48"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && editName.trim()) {
+                      updateShop.mutate([shop.id, editName.trim(), null, null, null, null]);
+                      setIsEditingName(false);
+                    } else if (e.key === 'Escape') {
+                      setIsEditingName(false);
+                    }
+                  }}
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  disabled={!editName.trim() || isTxBusy(updateShop)}
+                  onClick={() => {
+                    updateShop.mutate([shop.id, editName.trim(), null, null, null, null]);
+                    setIsEditingName(false);
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={() => setIsEditingName(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-lg">{shop.name}</CardTitle>
+                {!isReadOnly && !isSuspended && (
+                  <PermissionGuard required={AdminPermission.SHOP_MANAGE} fallback={null}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => {
+                        setEditName(shop.name);
+                        setIsEditingName(true);
+                      }}
+                      title={t('detail.editName')}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </PermissionGuard>
+                )}
+                <TxStatusIndicator txState={updateShop.txState} />
+              </div>
+            )}
             <CardDescription>
               ID: {shop.id} · {te(`shopType.${shop.shopType as ShopType}`) ?? shop.shopType}
             </CardDescription>

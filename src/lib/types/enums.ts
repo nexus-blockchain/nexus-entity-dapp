@@ -333,3 +333,50 @@ export enum AnnouncementCategory {
   Product = 'Product',
   Other = 'Other',
 }
+
+// 公告状态 - 3 种（与链端 AnnouncementStatus 一致）
+export enum AnnouncementStatus {
+  Active = 'Active',
+  Withdrawn = 'Withdrawn',
+  Expired = 'Expired',
+}
+
+// 审计状态 - 4 种（与链端 AuditStatus 一致）
+export enum AuditStatus {
+  NotRequired = 'NotRequired',
+  Pending = 'Pending',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
+}
+
+// 处罚级别 - 5 级（渐进式，与链端 PenaltyLevel 一致）
+export enum PenaltyLevel {
+  None = 'None',
+  Warning = 'Warning',
+  Restricted = 'Restricted',
+  Suspended = 'Suspended',
+  Delisted = 'Delisted',
+}
+
+// 内幕人员交易类型 - 5 种（与链端 InsiderTransactionType 一致）
+export enum InsiderTransactionType {
+  Buy = 'Buy',
+  Sell = 'Sell',
+  Transfer = 'Transfer',
+  Pledge = 'Pledge',
+  Gift = 'Gift',
+}
+
+// 违规类型 - 3 种（与链端 ViolationType 一致）
+export enum ViolationType {
+  LateDisclosure = 'LateDisclosure',
+  BlackoutTrading = 'BlackoutTrading',
+  UndisclosedMaterialEvent = 'UndisclosedMaterialEvent',
+}
+
+// 违规报告状态 - 3 种（与链端 ViolationReportStatus 一致）
+export enum ViolationReportStatus {
+  Pending = 'Pending',
+  Confirmed = 'Confirmed',
+  Rejected = 'Rejected',
+}

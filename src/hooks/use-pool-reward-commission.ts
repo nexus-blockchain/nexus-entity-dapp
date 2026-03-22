@@ -246,7 +246,6 @@ export function usePoolRewardCommission() {
   const setPoolRewardConfig = useEntityMutation(PALLET, 'setPoolRewardConfig', { invalidateKeys });
   const clearPoolRewardConfig = useEntityMutation(PALLET, 'clearPoolRewardConfig', { invalidateKeys });
   const claimPoolReward = useEntityMutation(PALLET, 'claimPoolReward', { invalidateKeys: claimInvalidateKeys });
-  const startNewRound = useEntityMutation(PALLET, 'startNewRound', { invalidateKeys });
   const pausePoolReward = useEntityMutation(PALLET, 'pausePoolReward', { invalidateKeys });
   const resumePoolReward = useEntityMutation(PALLET, 'resumePoolReward', { invalidateKeys });
 
@@ -265,7 +264,6 @@ export function usePoolRewardCommission() {
     setPoolRewardConfig,
     clearPoolRewardConfig,
     claimPoolReward,
-    startNewRound,
     pausePoolReward,
     resumePoolReward,
   };

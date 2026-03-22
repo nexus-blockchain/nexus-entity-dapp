@@ -279,6 +279,22 @@ export function useEntityToken() {
     ],
   });
 
+  const updateTokenConfig = useEntityMutation('entityToken', 'updateTokenConfig', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
+  const setMaxSupply = useEntityMutation('entityToken', 'setMaxSupply', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
+  const changeTokenType = useEntityMutation('entityToken', 'changeTokenType', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
+  const updateTokenMetadata = useEntityMutation('entityToken', 'updateTokenMetadata', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
   return {
     assetId,
     tokenConfig: tokenConfigQuery.data ?? null,
@@ -299,5 +315,9 @@ export function useEntityToken() {
     addToBlacklist,
     removeFromBlacklist,
     transferTokens,
+    updateTokenConfig,
+    setMaxSupply,
+    changeTokenType,
+    updateTokenMetadata,
   };
 }

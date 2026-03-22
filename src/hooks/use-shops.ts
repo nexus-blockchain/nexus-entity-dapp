@@ -132,6 +132,10 @@ export function useShops() {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
+  const updateShop = useEntityMutation('entityShop', 'updateShop', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
   return {
     shops: shopsQuery.data ?? [],
     isLoading: shopIdsQuery.isLoading || shopsQuery.isLoading,
@@ -142,5 +146,6 @@ export function useShops() {
     pauseShop,
     resumeShop,
     depositFund,
+    updateShop,
   };
 }

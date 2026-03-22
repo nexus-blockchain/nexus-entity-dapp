@@ -3,6 +3,7 @@
 import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
+import { useShops } from './use-shops';
 import { useWalletStore } from '@/stores/wallet-store';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import { OrderStatus, PaymentAsset, ProductCategory } from '@/lib/types/enums';
@@ -181,6 +182,75 @@ export function useShopOrders(shopId: number) {
     startService,
     completeService,
     cleanupShopOrders,
+  };
+}
+
+// ─── Hook: Entity Sales Orders (all shops aggregated) ───────
+
+export function useEntitySalesOrders() {
+  const { entityId } = useEntityContext();
+  const { shops, isLoading: shopsLoading } = useShops();
+  const shopIds = shops.map((s) => s.id);
+
+  // Fetch order IDs from all shops
+  const allOrderIdsQuery = useEntityQuery<{ shopId: number; orderIds: number[] }[]>(
+    ['entity', entityId, 'salesOrders', 'ids', shopIds],
+    async (api) => {
+      if (!hasPallet(api, 'entityTransaction')) return [];
+      if (shopIds.length === 0) return [];
+      const results = await Promise.all(
+        shopIds.map(async (shopId) => {
+          const raw = await (api.query as any).entityTransaction.shopOrders(shopId);
+          if (!raw) return { shopId, orderIds: [] as number[] };
+          const arr = raw.toJSON?.() ?? raw;
+          return {
+            shopId,
+            orderIds: Array.isArray(arr) ? arr.map(Number) : [],
+          };
+        }),
+      );
+      return results;
+    },
+    {
+      staleTime: STALE_TIMES.orders,
+      enabled: shopIds.length > 0,
+    },
+  );
+
+  // Flatten all order IDs and fetch full OrderData
+  const shopOrderMap = allOrderIdsQuery.data ?? [];
+  const allOrderIds = shopOrderMap.flatMap((s) => s.orderIds);
+
+  const ordersQuery = useEntityQuery<OrderData[]>(
+    ['entity', entityId, 'salesOrders', 'data', allOrderIds],
+    async (api) => {
+      if (!hasPallet(api, 'entityTransaction')) return [];
+      if (allOrderIds.length === 0) return [];
+      const results = await Promise.all(
+        allOrderIds.map((id) => (api.query as any).entityTransaction.orders(id)),
+      );
+      return results
+        .map((raw) => parseOrderData(raw))
+        .filter((o): o is OrderData => o !== null);
+    },
+    {
+      staleTime: STALE_TIMES.orders,
+      enabled: allOrderIds.length > 0,
+    },
+  );
+
+  // Per-shop order count (for index cleanup warnings)
+  const orderCountByShop: Record<number, number> = {};
+  for (const entry of shopOrderMap) {
+    orderCountByShop[entry.shopId] = entry.orderIds.length;
+  }
+
+  return {
+    orders: ordersQuery.data ?? [],
+    orderCountByShop,
+    isLoading: shopsLoading || allOrderIdsQuery.isLoading || ordersQuery.isLoading,
+    error: allOrderIdsQuery.error || ordersQuery.error,
+    shops,
   };
 }
 

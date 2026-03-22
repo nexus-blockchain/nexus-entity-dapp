@@ -7,6 +7,7 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useProduct } from '@/hooks/use-products';
 import { useNexUsdtPrice } from '@/hooks/use-nex-price';
 import { useIpfsUpload } from '@/hooks/use-ipfs-upload';
+import { useCommission, useProductCommissionRate } from '@/hooks/use-commission';
 import { PermissionGuard } from '@/components/permission-guard';
 import { IpfsImage } from '@/components/ipfs-image';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
@@ -163,6 +164,110 @@ function IpfsUploadField({
       {value && <p className="truncate text-xs text-green-600">CID: {value}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
+  );
+}
+
+// ─── Commission Rate Card ────────────────────────────────────
+
+function bpsDisplay(bps: number): string {
+  return `${bps} bps = ${(bps / 100).toFixed(2)}%`;
+}
+
+function CommissionRateCard({ productId, shopId, canAct }: { productId: number; shopId: number; canAct: boolean }) {
+  const t = useTranslations('shops.products.detail.commission');
+  const { entityId } = useEntityContext();
+  const { coreConfig } = useCommission();
+  const { productRate, shopRate, isLoading, setProductRate } = useProductCommissionRate(productId, shopId);
+  const [newRate, setNewRateInput] = useState('');
+
+  const entityRate = coreConfig?.maxCommissionRate ?? 0;
+  const effectiveRate = productRate ?? shopRate ?? entityRate;
+
+  const handleSet = useCallback(() => {
+    const val = Number(newRate);
+    if (!Number.isFinite(val) || val < 0 || val > 10000) return;
+    setProductRate.mutate([entityId, shopId, productId, val]);
+  }, [newRate, entityId, productId, shopId, setProductRate]);
+
+  const handleClear = useCallback(() => {
+    setProductRate.mutate([entityId, shopId, productId, null]);
+  }, [entityId, productId, shopId, setProductRate]);
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader><Skeleton className="h-6 w-36" /></CardHeader>
+        <CardContent><Skeleton className="h-20 w-full" /></CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('title')}</CardTitle>
+        <CardDescription>{t('desc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Rate hierarchy */}
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('entityRate')}</span>
+            <span className="font-medium">{bpsDisplay(entityRate)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('shopRate')}</span>
+            <span className="font-medium">
+              {shopRate != null ? bpsDisplay(shopRate) : <Badge variant="outline" className="text-xs">{t('notSet')}</Badge>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('productRate')}</span>
+            <span className="font-medium">
+              {productRate != null ? bpsDisplay(productRate) : <Badge variant="outline" className="text-xs">{t('notSet')}</Badge>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between border-t pt-2">
+            <span className="font-medium">{t('effectiveRate')}</span>
+            <span className="font-semibold text-primary">{bpsDisplay(effectiveRate)}</span>
+          </div>
+        </div>
+
+        {/* Set / Clear form */}
+        {canAct && (
+          <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+            <div className="space-y-3 border-t pt-3">
+              <div className="space-y-2">
+                <LabelWithTip htmlFor="commission-rate" tip={t('rateTip')}>{t('newRate')}</LabelWithTip>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="commission-rate"
+                    type="number"
+                    min="0"
+                    max="10000"
+                    placeholder="bps"
+                    value={newRate}
+                    onChange={(e) => setNewRateInput(e.target.value)}
+                    className="w-32"
+                  />
+                  <Button size="sm" onClick={handleSet} disabled={!newRate || setProductRate.txState.status === 'signing' || setProductRate.txState.status === 'broadcasting'}>
+                    {t('setRate')}
+                  </Button>
+                  {productRate != null && (
+                    <Button size="sm" variant="outline" onClick={handleClear} disabled={setProductRate.txState.status === 'signing' || setProductRate.txState.status === 'broadcasting'}>
+                      {t('clearRate')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {setProductRate.txState.status !== 'idle' && (
+                <TxStatusIndicator txState={setProductRate.txState} />
+              )}
+            </div>
+          </PermissionGuard>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -424,6 +529,9 @@ export function ProductDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Commission Rate Card */}
+      <CommissionRateCard productId={productId} shopId={shopId} canAct={canAct} />
 
       {/* Status Actions */}
       {canAct && validTransitions.filter((s) => s !== ProductStatus.SoldOut).length > 0 && (

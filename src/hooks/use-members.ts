@@ -77,6 +77,11 @@ function parseCustomLevels(raw: unknown): CustomLevel[] {
       threshold: BigInt(String(level.threshold ?? 0)),
       discountRate: Number(level.discountRate ?? level.discount_rate ?? 0),
       commissionBonus: Number(level.commissionBonus ?? level.commission_bonus ?? 0),
+      minDirectReferrals: Number(level.minDirectReferrals ?? level.min_direct_referrals ?? 0),
+      minQualifiedReferrals: Number(level.minQualifiedReferrals ?? level.min_qualified_referrals ?? 0),
+      minTeamSize: Number(level.minTeamSize ?? level.min_team_size ?? 0),
+      minIndirectReferrals: Number(level.minIndirectReferrals ?? level.min_indirect_referrals ?? 0),
+      minQualifiedIndirectReferrals: Number(level.minQualifiedIndirectReferrals ?? level.min_qualified_indirect_referrals ?? 0),
     };
   });
 }

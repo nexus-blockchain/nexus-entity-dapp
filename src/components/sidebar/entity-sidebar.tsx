@@ -555,7 +555,7 @@ export function EntitySidebar() {
       <aside
         data-testid="desktop-sidebar"
         className={cn(
-          'hidden md:flex flex-col border-r bg-card transition-all duration-200',
+          'hidden md:flex flex-col border-r bg-card transition-all duration-200 sticky top-0 h-screen overflow-y-auto',
           sidebarCollapsed ? 'w-[60px]' : 'w-60',
         )}
       >

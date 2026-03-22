@@ -85,12 +85,17 @@ export interface ReviewConstants {
   reviewWindowBlocks: number;
 }
 
+export interface EntityRegistryConstants {
+  initialFundUsdt: bigint;
+}
+
 export interface ChainConstants {
   nexMarket: NexMarketConstants | null;
   entityOrder: EntityOrderConstants | null;
   entityGovernance: GovernanceConstants | null;
   commissionCore: CommissionCoreConstants | null;
   entityReview: ReviewConstants | null;
+  entityRegistry: EntityRegistryConstants | null;
 }
 
 // ─── Parsers ──────────────────────────────────────────────
@@ -171,6 +176,13 @@ function parseReview(api: any): ReviewConstants | null {
   };
 }
 
+function parseEntityRegistry(api: any): EntityRegistryConstants | null {
+  if (!hasPallet(api, 'entityRegistry')) return null;
+  return {
+    initialFundUsdt: readBigInt(api, 'entityRegistry', 'initialFundUsdt'),
+  };
+}
+
 // ─── Hook ─────────────────────────────────────────────────
 
 /**
@@ -188,6 +200,7 @@ export function useChainConstants(): ChainConstants & { isLoading: boolean } {
       entityGovernance: parseGovernance(api),
       commissionCore: parseCommissionCore(api),
       entityReview: parseReview(api),
+      entityRegistry: parseEntityRegistry(api),
     }),
     { staleTime: 5 * 60_000 }, // 5 min — constants only change on runtime upgrade
   );
@@ -198,6 +211,7 @@ export function useChainConstants(): ChainConstants & { isLoading: boolean } {
     entityGovernance: query.data?.entityGovernance ?? null,
     commissionCore: query.data?.commissionCore ?? null,
     entityReview: query.data?.entityReview ?? null,
+    entityRegistry: query.data?.entityRegistry ?? null,
     isLoading: query.isLoading,
   };
 }

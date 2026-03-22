@@ -1,31 +1,32 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
-import { useBuyerOrders } from '@/hooks/use-orders';
+import { useEntitySalesOrders } from '@/hooks/use-orders';
+import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useChainConstants } from '@/hooks/use-chain-constants';
 import { useCurrentBlock } from '@/hooks/use-current-block';
+import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { EscrowStatusSection } from '@/components/order/escrow-status-section';
 import { DisputeNotice } from '@/components/order/dispute-notice';
 import { OrderTimeoutWarning } from '@/components/order/order-timeout-warning';
+import { AdminPermission } from '@/lib/types/models';
 import { OrderStatus, PaymentAsset, ProductCategory } from '@/lib/types/enums';
-import { getBuyerOrderActions, getDerivedOrderStage, isServiceLikeCategory } from '@/lib/utils';
+import { getDerivedOrderStage, getSellerOrderActions, isServiceLikeCategory } from '@/lib/utils';
 import type { OrderData } from '@/lib/types/models';
 
 import { useTranslations } from 'next-intl';
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils/cn';
 
 // ─── Constants ──────────────────────────────────────────────
@@ -44,6 +45,15 @@ const ORDER_STATUS_COLOR: Record<OrderStatus, string> = {
   [OrderStatus.PartiallyRefunded]: 'bg-orange-100 text-orange-800',
 };
 
+const FILTER_STATUSES: OrderStatus[] = [
+  OrderStatus.Paid,
+  OrderStatus.Shipped,
+  OrderStatus.Processing,
+  OrderStatus.Disputed,
+  OrderStatus.Completed,
+  OrderStatus.Cancelled,
+];
+
 function formatNexBalance(balance: bigint): string {
   const divisor = BigInt('1000000000000');
   const whole = balance / divisor;
@@ -53,378 +63,98 @@ function formatNexBalance(balance: bigint): string {
   return trimmed ? `${whole.toLocaleString()}.${trimmed}` : whole.toLocaleString();
 }
 
-function nexAmountToChain(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return '0';
-  const parts = trimmed.split('.');
-  const whole = parts[0] || '0';
-  const frac = (parts[1] || '').padEnd(12, '0').slice(0, 12);
-  return (BigInt(whole) * BigInt(1_000_000_000_000) + BigInt(frac)).toString();
-}
-
-function isPositiveAmountInput(input: string): boolean {
-  const trimmed = input.trim();
-  if (!trimmed || !/^\d+(\.\d+)?$/.test(trimmed)) return false;
-  return BigInt(nexAmountToChain(trimmed)) > 0n;
-}
-
 // ─── Loading Skeleton ───────────────────────────────────────
 
-function OrdersSkeleton() {
+function SalesOrdersSkeleton() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      <Skeleton className="h-8 w-48" />
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-24" />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        </CardContent>
-      </Card>
+      <Skeleton className="h-8 w-56" />
+      <div className="flex gap-3">
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="h-10 w-40" />
+      </div>
       {[1, 2, 3].map((i) => (
         <Card key={i}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <Skeleton className="h-5 w-32" />
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-4 w-48" />
+              </div>
               <Skeleton className="h-5 w-16 rounded-full" />
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-4 w-56" />
+            <Skeleton className="h-4 w-44" />
             <Skeleton className="h-4 w-36" />
           </CardContent>
+          <CardFooter>
+            <div className="flex gap-2">
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-8 w-20" />
+            </div>
+          </CardFooter>
         </Card>
       ))}
     </div>
   );
 }
 
-// ─── Place Order Form ───────────────────────────────────────
+// ─── Seller Order Card ──────────────────────────────────────
 
-function PlaceOrderForm() {
+function SellerOrderCard({
+  order,
+  shopName,
+  currentBlock,
+}: {
+  order: OrderData;
+  shopName: string;
+  currentBlock: number;
+}) {
+  const { entityId, isReadOnly, isSuspended } = useEntityContext();
   const t = useTranslations('orders');
-  const tc = useTranslations('common');
-  const { isReadOnly, isSuspended } = useEntityContext();
-  const { placeOrder } = useBuyerOrders();
-
-  const [form, setForm] = useState({
-    productId: '',
-    quantity: '1',
-    shippingCid: '',
-    useTokens: false,
-    tokenAmount: '',
-    paymentAsset: PaymentAsset.Native as PaymentAsset,
-    useShoppingBalance: false,
-    shoppingBalanceAmount: '',
-    noteCid: '',
-    referrer: '',
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-
-  const setField = useCallback((key: string, value: string | boolean) => {
-    setForm((prev) => {
-      const next = { ...prev, [key]: value };
-      if (key === 'paymentAsset' && value === PaymentAsset.EntityToken) {
-        next.useTokens = false;
-        next.tokenAmount = '';
-        next.useShoppingBalance = false;
-        next.shoppingBalanceAmount = '';
-      }
-      return next;
-    });
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
-
-  const validate = useCallback((): boolean => {
-    const fieldErrors: Record<string, string> = {};
-
-    const productId = Number(form.productId);
-    if (!Number.isInteger(productId) || productId <= 0) fieldErrors.productId = t('validProductId');
-
-    const quantity = Number(form.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1) fieldErrors.quantity = t('validQuantity');
-
-    if (form.paymentAsset === PaymentAsset.Native && form.useTokens && !isPositiveAmountInput(form.tokenAmount)) {
-      fieldErrors.tokenAmount = t('validTokenAmount');
-    }
-
-    if (
-      form.paymentAsset === PaymentAsset.Native &&
-      form.useShoppingBalance &&
-      !isPositiveAmountInput(form.shoppingBalanceAmount)
-    ) {
-      fieldErrors.shoppingBalanceAmount = t('validShoppingBalanceAmount');
-    }
-
-    if (Object.keys(fieldErrors).length > 0) {
-      setErrors(fieldErrors);
-      return false;
-    }
-    return true;
-  }, [form, t]);
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (validate()) {
-        setShowConfirmDialog(true);
-      }
-    },
-    [validate],
-  );
-
-  const handleConfirmOrder = useCallback(() => {
-    const productId = Number(form.productId);
-    const quantity = Number(form.quantity);
-    const shippingCid = form.shippingCid.trim() || null;
-    const noteCid = form.noteCid.trim() || null;
-    const referrer = form.referrer.trim() || null;
-    const useTokens = form.paymentAsset === PaymentAsset.Native && form.useTokens
-      ? nexAmountToChain(form.tokenAmount)
-      : null;
-    const useShoppingBalance = form.paymentAsset === PaymentAsset.Native && form.useShoppingBalance
-      ? nexAmountToChain(form.shoppingBalanceAmount)
-      : null;
-
-    // Pallet: place_order(product_id, quantity, shipping_cid, use_tokens, use_shopping_balance,
-    //                      payment_asset, note_cid, referrer, max_nex_amount, max_token_amount)
-    placeOrder.mutate([
-      productId,
-      quantity,
-      shippingCid,
-      useTokens,
-      useShoppingBalance,
-      form.paymentAsset,
-      noteCid,
-      referrer,
-      null, // max_nex_amount
-      null, // max_token_amount
-    ]);
-    setShowConfirmDialog(false);
-  }, [form, placeOrder]);
-
-  if (isReadOnly || isSuspended) return null;
-
-  return (
-    <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">{t('placeOrder')}</CardTitle>
-          <CardDescription>{t('placeOrderDesc')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <LabelWithTip htmlFor="order-product-id" tip={t('help.productId')}>{t('productId')}</LabelWithTip>
-                <Input
-                  id="order-product-id"
-                  type="number"
-                  min="1"
-                  value={form.productId}
-                  onChange={(e) => setField('productId', e.target.value)}
-                  required
-                />
-                {errors.productId && <p className="text-xs text-destructive">{errors.productId}</p>}
-              </div>
-              <div className="space-y-2">
-                <LabelWithTip htmlFor="order-quantity" tip={t('help.quantity')}>{t('quantity')}</LabelWithTip>
-                <Input
-                  id="order-quantity"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={form.quantity}
-                  onChange={(e) => setField('quantity', e.target.value)}
-                  required
-                />
-                {errors.quantity && <p className="text-xs text-destructive">{errors.quantity}</p>}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <LabelWithTip tip={t('help.paymentMethod')}>{t('paymentMethod')}</LabelWithTip>
-                <Select
-                  value={String(form.paymentAsset)}
-                  onValueChange={(value) => setField('paymentAsset', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={t('selectPaymentMethod')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={String(PaymentAsset.Native)}>{t('nexNative')}</SelectItem>
-                    <SelectItem value={String(PaymentAsset.EntityToken)}>{t('entityToken')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <LabelWithTip htmlFor="order-referrer" tip={t('help.referrerAddress')}>{t('referrerAddress')}</LabelWithTip>
-                <Input
-                  id="order-referrer"
-                  type="text"
-                  value={form.referrer}
-                  onChange={(e) => setField('referrer', e.target.value)}
-                  placeholder={t('referrerPlaceholder')}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="order-shipping-cid">{t('shippingCid') ?? 'Shipping CID'}</Label>
-                <Input
-                  id="order-shipping-cid"
-                  type="text"
-                  value={form.shippingCid}
-                  onChange={(e) => setField('shippingCid', e.target.value)}
-                  placeholder="Qm..."
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="order-note-cid">{t('noteCid') ?? 'Note CID'}</Label>
-                <Input
-                  id="order-note-cid"
-                  type="text"
-                  value={form.noteCid}
-                  onChange={(e) => setField('noteCid', e.target.value)}
-                  placeholder="Qm..."
-                  className="font-mono text-sm"
-                />
-              </div>
-            </div>
-
-            {form.paymentAsset === PaymentAsset.Native ? (
-              <div className="space-y-4">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="use-shopping-balance"
-                      checked={form.useShoppingBalance}
-                      onCheckedChange={(checked) => setField('useShoppingBalance', checked)}
-                    />
-                    <LabelWithTip htmlFor="use-shopping-balance" tip={t('help.useShoppingBalance')}>{t('useShoppingBalance')}</LabelWithTip>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="use-tokens"
-                      checked={form.useTokens}
-                      onCheckedChange={(checked) => setField('useTokens', checked)}
-                    />
-                    <LabelWithTip htmlFor="use-tokens" tip={t('help.useTokens')}>{t('useTokens')}</LabelWithTip>
-                  </div>
-                </div>
-
-                {(form.useShoppingBalance || form.useTokens) && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    {form.useShoppingBalance && (
-                      <div className="space-y-2">
-                        <LabelWithTip htmlFor="shopping-balance-amount" tip={t('help.shoppingBalanceAmount')}>
-                          {t('shoppingBalanceAmount')}
-                        </LabelWithTip>
-                        <Input
-                          id="shopping-balance-amount"
-                          type="text"
-                          inputMode="decimal"
-                          value={form.shoppingBalanceAmount}
-                          onChange={(e) => setField('shoppingBalanceAmount', e.target.value)}
-                          placeholder={t('shoppingBalanceAmountPlaceholder')}
-                        />
-                        {errors.shoppingBalanceAmount && (
-                          <p className="text-xs text-destructive">{errors.shoppingBalanceAmount}</p>
-                        )}
-                      </div>
-                    )}
-
-                    {form.useTokens && (
-                      <div className="space-y-2">
-                        <LabelWithTip htmlFor="token-amount" tip={t('help.tokenAmount')}>
-                          {t('tokenAmount')}
-                        </LabelWithTip>
-                        <Input
-                          id="token-amount"
-                          type="text"
-                          inputMode="decimal"
-                          value={form.tokenAmount}
-                          onChange={(e) => setField('tokenAmount', e.target.value)}
-                          placeholder={t('tokenAmountPlaceholder')}
-                        />
-                        {errors.tokenAmount && (
-                          <p className="text-xs text-destructive">{errors.tokenAmount}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t('loyaltyDeductionNativeOnly')}</p>
-            )}
-
-            <Separator />
-
-            <div className="flex items-center gap-3">
-              <Button
-                type="submit"
-                disabled={placeOrder.txState.status === 'signing' || placeOrder.txState.status === 'broadcasting'}
-              >
-                {t('submitOrder')}
-              </Button>
-              <TxStatusIndicator txState={placeOrder.txState} />
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('confirmOrder')}</DialogTitle>
-            <DialogDescription>
-              {t('orderInfo')}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
-              {tc('cancel')}
-            </Button>
-            <Button onClick={handleConfirmOrder}>
-              {tc('confirm')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-// ─── Buyer Order Card ───────────────────────────────────────
-
-function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBlock: number }) {
-  const t = useTranslations('orders');
-  const tc = useTranslations('common');
   const te = useTranslations('enums');
-  const { isReadOnly, isSuspended } = useEntityContext();
-  const { confirmReceipt, requestRefund, cancelOrder, confirmService } = useBuyerOrders();
+  const tc = useTranslations('common');
+
+  const shopId = order.shopId;
+
+  // Each card creates its own mutations so tx state is per-card
+  const shipOrder = useEntityMutation('entityTransaction', 'shipOrder', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+  const approveRefund = useEntityMutation('entityTransaction', 'approveRefund', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+  const sellerCancelOrder = useEntityMutation('entityTransaction', 'sellerCancelOrder', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+  const startService = useEntityMutation('entityTransaction', 'startService', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+  const completeService = useEntityMutation('entityTransaction', 'completeService', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+
   const statusColor = ORDER_STATUS_COLOR[order.status];
   const canAct = !isReadOnly && !isSuspended;
 
-  const buyerActions = getBuyerOrderActions(order);
+  const sellerActions = getSellerOrderActions(order);
   const derivedStage = getDerivedOrderStage(order);
   const statusLabel = derivedStage
     ? t(derivedStage)
@@ -432,42 +162,53 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
   const isServiceLike = isServiceLikeCategory(order.productCategory ?? ProductCategory.Physical);
 
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; description: string; onConfirm: () => void } | null>(null);
-  const [refundReasonDialog, setRefundReasonDialog] = useState(false);
-  const [refundReasonCid, setRefundReasonCid] = useState('');
+  const [trackingCidDialog, setTrackingCidDialog] = useState(false);
+  const [trackingCid, setTrackingCid] = useState('');
+  const [cancelReasonDialog, setCancelReasonDialog] = useState(false);
+  const [cancelReasonCid, setCancelReasonCid] = useState('');
 
-  const handleAction = useCallback((action: 'confirmReceipt' | 'confirmService') => {
+  const handleAction = useCallback((action: 'shipOrder' | 'startService' | 'completeService') => {
     switch (action) {
-      case 'confirmReceipt':
-        confirmReceipt.mutate([order.id]);
+      case 'shipOrder':
+        setTrackingCid('');
+        setTrackingCidDialog(true);
         return;
-      case 'confirmService':
-        confirmService.mutate([order.id]);
+      case 'startService':
+        startService.mutate([order.id]);
+        return;
+      case 'completeService':
+        completeService.mutate([order.id]);
         return;
     }
-  }, [order.id, confirmReceipt, confirmService]);
+  }, [order.id, startService, completeService]);
 
-  const handleRequestRefund = useCallback(() => {
-    setRefundReasonCid('');
-    setRefundReasonDialog(true);
-  }, []);
+  const handleShipConfirm = useCallback(() => {
+    if (!trackingCid.trim()) return;
+    shipOrder.mutate([order.id, trackingCid.trim()]);
+    setTrackingCidDialog(false);
+  }, [order.id, trackingCid, shipOrder]);
 
-  const handleRefundConfirm = useCallback(() => {
-    if (!refundReasonCid.trim()) return;
-    // Pallet: request_refund(order_id, reason_cid: Vec<u8>) — reason_cid is required
-    requestRefund.mutate([order.id, refundReasonCid.trim()]);
-    setRefundReasonDialog(false);
-  }, [order.id, refundReasonCid, requestRefund]);
-
-  const handleCancel = useCallback(() => {
+  const handleApproveRefund = useCallback(() => {
     setConfirmDialog({
-      title: t('cancelOrder'),
-      description: t('orderNumber', { id: order.id }),
+      title: t('confirmApproveRefund'),
+      description: t('confirmApproveRefundDesc', { id: order.id }),
       onConfirm: () => {
-        cancelOrder.mutate([order.id]);
+        approveRefund.mutate([order.id]);
         setConfirmDialog(null);
       },
     });
-  }, [order.id, cancelOrder, t]);
+  }, [order.id, approveRefund, t]);
+
+  const handleCancel = useCallback(() => {
+    setCancelReasonCid('');
+    setCancelReasonDialog(true);
+  }, []);
+
+  const handleCancelConfirm = useCallback(() => {
+    if (!cancelReasonCid.trim()) return;
+    sellerCancelOrder.mutate([order.id, cancelReasonCid.trim()]);
+    setCancelReasonDialog(false);
+  }, [order.id, cancelReasonCid, sellerCancelOrder]);
 
   return (
     <>
@@ -475,9 +216,14 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div>
-              <CardTitle className="text-sm font-medium">{t('orderNumber', { id: order.id })}</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                {t('orderNumber', { id: order.id })}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {shopName}
+                </span>
+              </CardTitle>
               <CardDescription className="mt-0.5">
-                {t('shopAndProduct', { shopId: order.shopId, productId: order.productId, quantity: order.quantity })}
+                {t('productAndQty', { productId: order.productId, quantity: order.quantity })}
               </CardDescription>
             </div>
             <Badge className={cn('shrink-0', statusColor)}>
@@ -488,18 +234,26 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
 
         <CardContent className="space-y-3">
           <div className="space-y-1 text-sm text-muted-foreground">
+            <p>{t('buyer')}: {order.buyer.slice(0, 8)}...{order.buyer.slice(-6)}</p>
             <p>{t('amount')}: {formatNexBalance(order.totalAmount)} {te(`paymentAsset.${order.paymentAsset}`)}</p>
             {order.escrowId != null && <p>{t('escrowId')}: {order.escrowId}</p>}
             {isServiceLike && derivedStage && <p>{t('servicePhase')}: {t(derivedStage)}</p>}
           </div>
 
-          {/* Escrow status display */}
-          {order.escrowId != null && <EscrowStatusSection escrowId={order.escrowId} />}
+          {order.escrowId != null && (
+            <>
+              <Separator />
+              <EscrowStatusSection escrowId={order.escrowId} />
+            </>
+          )}
 
-          {/* Dispute notice */}
-          {order.status === OrderStatus.Disputed && <DisputeNotice />}
+          {order.status === OrderStatus.Disputed && (
+            <>
+              <Separator />
+              <DisputeNotice />
+            </>
+          )}
 
-          {/* Timeout warning */}
           <OrderTimeoutWarning
             updatedAt={order.updatedAt}
             currentBlock={currentBlock}
@@ -507,41 +261,54 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
           />
         </CardContent>
 
-        {/* Buyer actions -- driven by order flow transitions */}
         {canAct && (
-          <CardFooter className="flex-col items-start gap-2">
-            <div className="flex flex-wrap gap-2">
-              {buyerActions.includes('confirmReceipt') && (
-                <Button size="sm" variant="default" onClick={() => handleAction('confirmReceipt')}>
-                  {t('confirmReceipt')}
-                </Button>
-              )}
-              {buyerActions.includes('confirmService') && (
-                <Button size="sm" variant="default" onClick={() => handleAction('confirmService')}>
-                  {t('confirmServiceCompletion')}
-                </Button>
-              )}
-              {buyerActions.includes('requestRefund') && (
-                <Button size="sm" variant="outline" className="border-orange-300 text-orange-600 hover:bg-orange-50" onClick={handleRequestRefund}>
-                  {t('requestRefund')}
-                </Button>
-              )}
-              {buyerActions.includes('cancelOrder') && (
-                <Button size="sm" variant="ghost" onClick={handleCancel}>
-                  {t('cancelOrder')}
-                </Button>
-              )}
-            </div>
-            <div>
-              <TxStatusIndicator txState={confirmReceipt.txState} />
-              <TxStatusIndicator txState={confirmService.txState} />
-              <TxStatusIndicator txState={requestRefund.txState} />
-              <TxStatusIndicator txState={cancelOrder.txState} />
-            </div>
-          </CardFooter>
+          <PermissionGuard required={AdminPermission.ORDER_MANAGE} fallback={null}>
+            <CardFooter className="flex-col items-start gap-2">
+              <div className="flex flex-wrap gap-2">
+                {sellerActions.includes('shipOrder') && (
+                  <Button size="sm" variant="default" onClick={() => handleAction('shipOrder')}>
+                    {t('confirmShipment')}
+                  </Button>
+                )}
+                {sellerActions.includes('startService') && (
+                  <Button size="sm" variant="secondary" onClick={() => handleAction('startService')}>
+                    {t('startService')}
+                  </Button>
+                )}
+                {sellerActions.includes('completeService') && (
+                  <Button size="sm" variant="secondary" onClick={() => handleAction('completeService')}>
+                    {t('completeService')}
+                  </Button>
+                )}
+                {sellerActions.includes('approveRefund') && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-orange-300 text-orange-600 hover:bg-orange-50"
+                    onClick={handleApproveRefund}
+                  >
+                    {t('approveRefund')}
+                  </Button>
+                )}
+                {sellerActions.includes('sellerCancelOrder') && (
+                  <Button size="sm" variant="ghost" onClick={handleCancel}>
+                    {t('sellerCancelOrder')}
+                  </Button>
+                )}
+              </div>
+              <div>
+                <TxStatusIndicator txState={shipOrder.txState} />
+                <TxStatusIndicator txState={startService.txState} />
+                <TxStatusIndicator txState={completeService.txState} />
+                <TxStatusIndicator txState={approveRefund.txState} />
+                <TxStatusIndicator txState={sellerCancelOrder.txState} />
+              </div>
+            </CardFooter>
+          </PermissionGuard>
         )}
       </Card>
 
+      {/* Approve refund confirm dialog */}
       <Dialog open={confirmDialog !== null} onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}>
         <DialogContent>
           <DialogHeader>
@@ -555,26 +322,50 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
         </DialogContent>
       </Dialog>
 
-      {/* Refund reason CID dialog */}
-      <Dialog open={refundReasonDialog} onOpenChange={setRefundReasonDialog}>
+      {/* Tracking CID dialog for shipping */}
+      <Dialog open={trackingCidDialog} onOpenChange={setTrackingCidDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('requestRefund')}</DialogTitle>
+            <DialogTitle>{t('confirmShipment')}</DialogTitle>
             <DialogDescription>{t('orderNumber', { id: order.id })}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
-            <Label htmlFor={`refund-reason-${order.id}`}>{tc('reasonCidLabel') || 'Reason CID'}</Label>
+            <Label htmlFor={`tracking-cid-${order.id}`}>{tc('trackingCidLabel') || 'Tracking CID'}</Label>
             <Input
-              id={`refund-reason-${order.id}`}
-              value={refundReasonCid}
-              onChange={(e) => setRefundReasonCid(e.target.value)}
+              id={`tracking-cid-${order.id}`}
+              value={trackingCid}
+              onChange={(e) => setTrackingCid(e.target.value)}
+              placeholder={tc('trackingCidPlaceholder') || 'Qm...'}
+              className="font-mono text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTrackingCidDialog(false)}>{tc('cancel')}</Button>
+            <Button onClick={handleShipConfirm} disabled={!trackingCid.trim()}>{tc('confirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel reason CID dialog for seller cancel */}
+      <Dialog open={cancelReasonDialog} onOpenChange={setCancelReasonDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sellerCancelOrder')}</DialogTitle>
+            <DialogDescription>{t('orderNumber', { id: order.id })}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor={`cancel-reason-${order.id}`}>{tc('reasonCidLabel') || 'Reason CID'}</Label>
+            <Input
+              id={`cancel-reason-${order.id}`}
+              value={cancelReasonCid}
+              onChange={(e) => setCancelReasonCid(e.target.value)}
               placeholder={tc('reasonCidPlaceholder') || 'Qm...'}
               className="font-mono text-sm"
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRefundReasonDialog(false)}>{tc('cancel')}</Button>
-            <Button variant="destructive" onClick={handleRefundConfirm} disabled={!refundReasonCid.trim()}>{tc('confirm')}</Button>
+            <Button variant="outline" onClick={() => setCancelReasonDialog(false)}>{tc('cancel')}</Button>
+            <Button variant="destructive" onClick={handleCancelConfirm} disabled={!cancelReasonCid.trim()}>{tc('confirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -582,22 +373,107 @@ function BuyerOrderCard({ order, currentBlock }: { order: OrderData; currentBloc
   );
 }
 
+// ─── Per-Shop Cleanup Warning ───────────────────────────────
+
+function ShopCleanupWarning({
+  shopId,
+  shopName,
+  orderCount,
+  maxShopOrders,
+}: {
+  shopId: number;
+  shopName: string;
+  orderCount: number;
+  maxShopOrders: number;
+}) {
+  const t = useTranslations('orders');
+  const { entityId } = useEntityContext();
+
+  const cleanupShopOrders = useEntityMutation('entityTransaction', 'cleanupShopOrders', {
+    invalidateKeys: [
+      ['entity', entityId, 'shop', shopId, 'orders'],
+      ['entity', entityId, 'salesOrders'],
+    ],
+  });
+
+  const isFull = maxShopOrders > 0 && orderCount >= maxShopOrders;
+  const isNearFull = maxShopOrders > 0 && orderCount >= maxShopOrders * 0.8;
+  const isBusy = cleanupShopOrders.txState.status === 'signing' || cleanupShopOrders.txState.status === 'broadcasting';
+
+  if (!isNearFull) return null;
+
+  return (
+    <Card className={cn(
+      'border',
+      isFull ? 'border-destructive bg-destructive/5' : 'border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20',
+    )}>
+      <CardContent className="flex items-center justify-between gap-4 p-4">
+        <div className="space-y-1">
+          <p className={cn('text-sm font-medium', isFull ? 'text-destructive' : 'text-yellow-700 dark:text-yellow-400')}>
+            {shopName}: {isFull ? t('indexFull') : t('indexNearFull')}
+          </p>
+          {maxShopOrders > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {t('indexUsage', { count: String(orderCount), max: String(maxShopOrders) })}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">{t('cleanupDesc')}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant={isFull ? 'destructive' : 'outline'}
+            size="sm"
+            disabled={isBusy}
+            onClick={() => cleanupShopOrders.mutate([shopId])}
+          >
+            {t('cleanupOrders')}
+          </Button>
+          <TxStatusIndicator txState={cleanupShopOrders.txState} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────
 
-export function BuyerOrdersPage() {
+export function SalesOrdersPage() {
   const t = useTranslations('orders');
   const tc = useTranslations('common');
-  const { orders, orderIndexCount, isLoading, error, cleanupBuyerOrders } = useBuyerOrders();
+  const te = useTranslations('enums');
+  const { orders, orderCountByShop, isLoading, error, shops } = useEntitySalesOrders();
   const { entityOrder } = useChainConstants();
   const currentBlock = useCurrentBlock();
 
-  const maxBuyerOrders = entityOrder?.maxBuyerOrders ?? 0;
-  const isFull = maxBuyerOrders > 0 && orderIndexCount >= maxBuyerOrders;
-  const isNearFull = maxBuyerOrders > 0 && orderIndexCount >= maxBuyerOrders * 0.8;
-  const isBusy = cleanupBuyerOrders.txState.status === 'signing' || cleanupBuyerOrders.txState.status === 'broadcasting';
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [shopFilter, setShopFilter] = useState<string>('all');
+
+  const maxShopOrders = entityOrder?.maxShopOrders ?? 0;
+
+  // Build a shopId -> shopName map
+  const shopNameMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const shop of shops) {
+      map[shop.id] = shop.name || `#${shop.id}`;
+    }
+    return map;
+  }, [shops]);
+
+  // Filter orders
+  const filteredOrders = useMemo(() => {
+    let result = orders;
+    if (statusFilter !== 'all') {
+      result = result.filter((o) => o.status === statusFilter);
+    }
+    if (shopFilter !== 'all') {
+      result = result.filter((o) => o.shopId === Number(shopFilter));
+    }
+    // Sort by updatedAt descending (most recent first)
+    return [...result].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [orders, statusFilter, shopFilter]);
 
   if (isLoading) {
-    return <OrdersSkeleton />;
+    return <SalesOrdersSkeleton />;
   }
 
   if (error) {
@@ -612,45 +488,68 @@ export function BuyerOrdersPage() {
     );
   }
 
-  return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      <h1 className="text-2xl font-bold tracking-tight">{t('title')}</h1>
-
-      <PlaceOrderForm />
-
-      {isNearFull && (
-        <Card className={cn(
-          'border',
-          isFull ? 'border-destructive bg-destructive/5' : 'border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20',
-        )}>
-          <CardContent className="flex items-center justify-between gap-4 p-4">
-            <div className="space-y-1">
-              <p className={cn('text-sm font-medium', isFull ? 'text-destructive' : 'text-yellow-700 dark:text-yellow-400')}>
-                {isFull ? t('indexFull') : t('indexNearFull')}
-              </p>
-              {maxBuyerOrders > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {t('indexUsage', { count: String(orderIndexCount), max: String(maxBuyerOrders) })}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">{t('cleanupDesc')}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                variant={isFull ? 'destructive' : 'outline'}
-                size="sm"
-                disabled={isBusy}
-                onClick={() => cleanupBuyerOrders.mutate([])}
-              >
-                {t('cleanupOrders')}
-              </Button>
-              <TxStatusIndicator txState={cleanupBuyerOrders.txState} />
-            </div>
+  // No shops created yet
+  if (shops.length === 0) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
+        <h1 className="text-2xl font-bold tracking-tight">{t('salesTitle')}</h1>
+        <Card className="border-dashed">
+          <CardContent className="flex items-center justify-center py-8">
+            <p className="text-sm text-muted-foreground">{t('noShops')}</p>
           </CardContent>
         </Card>
-      )}
+      </div>
+    );
+  }
 
-      {orders.length === 0 ? (
+  return (
+    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
+      <h1 className="text-2xl font-bold tracking-tight">{t('salesTitle')}</h1>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder={t('allStatuses')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('allStatuses')}</SelectItem>
+            {FILTER_STATUSES.map((status) => (
+              <SelectItem key={status} value={status}>
+                {te(`orderStatus.${status}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={shopFilter} onValueChange={setShopFilter}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder={t('allShops')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('allShops')}</SelectItem>
+            {shops.map((shop) => (
+              <SelectItem key={shop.id} value={String(shop.id)}>
+                {t('shopLabel', { id: shop.id, name: shop.name || `#${shop.id}` })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Per-shop cleanup warnings */}
+      {shops.map((shop) => (
+        <ShopCleanupWarning
+          key={shop.id}
+          shopId={shop.id}
+          shopName={shop.name || t('shopIdLabel', { id: shop.id })}
+          orderCount={orderCountByShop[shop.id] ?? 0}
+          maxShopOrders={maxShopOrders}
+        />
+      ))}
+
+      {/* Order list */}
+      {filteredOrders.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex items-center justify-center py-8">
             <p className="text-sm text-muted-foreground">{t('noOrders')}</p>
@@ -658,8 +557,13 @@ export function BuyerOrdersPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {orders.map((order) => (
-            <BuyerOrderCard key={order.id} order={order} currentBlock={currentBlock} />
+          {filteredOrders.map((order) => (
+            <SellerOrderCard
+              key={order.id}
+              order={order}
+              shopName={shopNameMap[order.shopId] ?? t('shopIdLabel', { id: order.shopId })}
+              currentBlock={currentBlock}
+            />
           ))}
         </div>
       )}

@@ -7,6 +7,7 @@ import { STALE_TIMES } from '@/lib/chain/constants';
 import type {
   CommissionConfig,
   CoreCommissionConfig,
+  PluginBudgetCaps,
   EntityWithdrawalConfig,
   WithdrawalMode,
   WithdrawalTierConfig,
@@ -52,6 +53,17 @@ function unwrapU32(raw: unknown): number {
 
 // ─── Parsers ────────────────────────────────────────────────
 
+function parsePluginBudgetCaps(obj: any): PluginBudgetCaps | null {
+  if (!obj) return null;
+  return {
+    referralCap: Number(obj.referralCap ?? obj.referral_cap ?? 0),
+    multiLevelCap: Number(obj.multiLevelCap ?? obj.multi_level_cap ?? 0),
+    levelDiffCap: Number(obj.levelDiffCap ?? obj.level_diff_cap ?? 0),
+    singleLineCap: Number(obj.singleLineCap ?? obj.single_line_cap ?? 0),
+    teamCap: Number(obj.teamCap ?? obj.team_cap ?? 0),
+  };
+}
+
 function parseCoreCommissionConfig(raw: unknown): CoreCommissionConfig | null {
   const obj = unwrapRaw(raw);
   if (!obj) return null;
@@ -62,6 +74,7 @@ function parseCoreCommissionConfig(raw: unknown): CoreCommissionConfig | null {
     withdrawalCooldown: Number(obj.withdrawalCooldown ?? obj.withdrawal_cooldown ?? 0),
     creatorRewardRate: Number(obj.creatorRewardRate ?? obj.creator_reward_rate ?? 0),
     tokenWithdrawalCooldown: Number(obj.tokenWithdrawalCooldown ?? obj.token_withdrawal_cooldown ?? 0),
+    pluginBudgetCaps: parsePluginBudgetCaps(obj.pluginBudgetCaps ?? obj.plugin_budget_caps ?? null),
   };
 }
 
@@ -603,6 +616,7 @@ export function useCommission() {
   const setWithdrawalCooldown = useEntityMutation(PALLET, 'setWithdrawalCooldown', { invalidateKeys });
   const setMinWithdrawalInterval = useEntityMutation(PALLET, 'setMinWithdrawalInterval', { invalidateKeys });
   const clearCommissionConfig = useEntityMutation(PALLET, 'clearCommissionConfig', { invalidateKeys });
+  const setPluginBudgetCaps = useEntityMutation(PALLET, 'setPluginBudgetCaps', { invalidateKeys });
   const clearWithdrawalConfig = useEntityMutation(PALLET, 'clearWithdrawalConfig', { invalidateKeys });
   const clearTokenWithdrawalConfig = useEntityMutation(PALLET, 'clearTokenWithdrawalConfig', { invalidateKeys });
 
@@ -684,6 +698,7 @@ export function useCommission() {
     setWithdrawalCooldown,
     setMinWithdrawalInterval,
     clearCommissionConfig,
+    setPluginBudgetCaps,
     clearWithdrawalConfig,
     clearTokenWithdrawalConfig,
 
@@ -708,5 +723,60 @@ export function useCommission() {
     forceEnableEntityCommission,
     forceGlobalPause,
     retryCancelCommission,
+  };
+}
+
+// ─── Product / Shop Commission Rate Hook ─────────────────
+
+function unwrapOptionU16(raw: unknown): number | null {
+  if (!raw || (raw as { isNone?: boolean }).isNone) return null;
+  const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null);
+  if (unwrapped == null) return null;
+  const v = (unwrapped as any)?.toJSON?.() ?? unwrapped;
+  return Number(v);
+}
+
+export function useProductCommissionRate(productId: number, shopId: number) {
+  const { entityId } = useEntityContext();
+
+  const productRateQuery = useEntityQuery<number | null>(
+    ['entity', entityId, 'product', productId, 'commissionRate'],
+    async (api) => {
+      if (!hasPallet(api, PALLET)) return null;
+      const fn = (api.query as any)[PALLET].productCommissionRate;
+      if (!fn) return null;
+      const raw = await fn(productId);
+      return unwrapOptionU16(raw);
+    },
+    { enabled: productId > 0 },
+  );
+
+  const shopRateQuery = useEntityQuery<number | null>(
+    ['entity', entityId, 'shop', shopId, 'commissionRate'],
+    async (api) => {
+      if (!hasPallet(api, PALLET)) return null;
+      const fn = (api.query as any)[PALLET].shopCommissionRate;
+      if (!fn) return null;
+      const raw = await fn(shopId);
+      return unwrapOptionU16(raw);
+    },
+    { enabled: shopId > 0 },
+  );
+
+  const invalidateKeys = [
+    ['entity', entityId, 'product', productId, 'commissionRate'],
+    ['entity', entityId, 'shop', shopId, 'commissionRate'],
+    ['entity', entityId, 'commission'],
+  ];
+
+  const setProductRate = useEntityMutation(PALLET, 'setProductCommissionRate', { invalidateKeys });
+  const setShopRate = useEntityMutation(PALLET, 'setShopCommissionRate', { invalidateKeys });
+
+  return {
+    productRate: productRateQuery.data ?? null,
+    shopRate: shopRateQuery.data ?? null,
+    isLoading: productRateQuery.isLoading || shopRateQuery.isLoading,
+    setProductRate,
+    setShopRate,
   };
 }

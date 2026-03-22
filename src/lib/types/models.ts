@@ -230,6 +230,12 @@ export interface CustomLevel {
   threshold: bigint;
   discountRate: number;
   commissionBonus: number;
+  // Referral / team upgrade thresholds (0 = no requirement)
+  minDirectReferrals: number;
+  minQualifiedReferrals: number;
+  minTeamSize: number;
+  minIndirectReferrals: number;
+  minQualifiedIndirectReferrals: number;
 }
 
 // 等级系统完整数据（含系统级配置）
@@ -300,6 +306,14 @@ export interface WithdrawalConfig {
   cooldown: number;
 }
 
+export interface PluginBudgetCaps {
+  referralCap: number;
+  multiLevelCap: number;
+  levelDiffCap: number;
+  singleLineCap: number;
+  teamCap: number;
+}
+
 export interface CoreCommissionConfig {
   enabledModes: number;
   maxCommissionRate: number;
@@ -307,6 +321,7 @@ export interface CoreCommissionConfig {
   withdrawalCooldown: number;
   creatorRewardRate: number;
   tokenWithdrawalCooldown: number;
+  pluginBudgetCaps: PluginBudgetCaps | null;
 }
 
 export type WithdrawalMode =

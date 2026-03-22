@@ -59,6 +59,11 @@ interface LevelFormData {
   threshold: string; // USDT display value (e.g. "100.5")
   discountRate: string; // basis points
   commissionBonus: string; // basis points
+  minDirectReferrals: string;
+  minQualifiedReferrals: string;
+  minTeamSize: string;
+  minIndirectReferrals: string;
+  minQualifiedIndirectReferrals: string;
 }
 
 const EMPTY_LEVEL_FORM: LevelFormData = {
@@ -66,6 +71,11 @@ const EMPTY_LEVEL_FORM: LevelFormData = {
   threshold: '',
   discountRate: '',
   commissionBonus: '',
+  minDirectReferrals: '',
+  minQualifiedReferrals: '',
+  minTeamSize: '',
+  minIndirectReferrals: '',
+  minQualifiedIndirectReferrals: '',
 };
 
 function describeRule(rule: UpgradeRule, te: ReturnType<typeof useTranslations<'enums'>>): string {
@@ -138,26 +148,57 @@ function LevelForm({ initial, onSubmit, submitLabel, busy }: {
   }, [form, initial, onSubmit]);
 
   return (
-    <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-      <div className="space-y-1">
-        <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.levelName')}>{t('levels.levelName')}</LabelWithTip>
-        <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t('levels.levelName')} required />
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="space-y-1">
+          <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.levelName')}>{t('levels.levelName')}</LabelWithTip>
+          <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t('levels.levelName')} required />
+        </div>
+        <div className="space-y-1">
+          <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.threshold')}>{t('levels.threshold')} (USDT)</LabelWithTip>
+          <Input value={form.threshold} onChange={(e) => setForm((prev) => ({ ...prev, threshold: e.target.value }))} placeholder="100" required />
+        </div>
+        <div className="space-y-1">
+          <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.discountRate')}>{t('levels.discountRate')} (BPS)</LabelWithTip>
+          <Input type="number" min="0" max="10000" value={form.discountRate} onChange={(e) => setForm((prev) => ({ ...prev, discountRate: e.target.value }))} placeholder="500" required />
+        </div>
+        <div className="space-y-1">
+          <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.commissionBonus')}>{t('levels.commissionBonus')} (BPS)</LabelWithTip>
+          <Input type="number" min="0" max="10000" value={form.commissionBonus} onChange={(e) => setForm((prev) => ({ ...prev, commissionBonus: e.target.value }))} placeholder="100" required />
+        </div>
+        <div className="flex items-end">
+          <Button type="submit" disabled={busy} className="w-full">{submitLabel}</Button>
+        </div>
       </div>
-      <div className="space-y-1">
-        <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.threshold')}>{t('levels.threshold')} (USDT)</LabelWithTip>
-        <Input value={form.threshold} onChange={(e) => setForm((prev) => ({ ...prev, threshold: e.target.value }))} placeholder="100" required />
-      </div>
-      <div className="space-y-1">
-        <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.discountRate')}>{t('levels.discountRate')} (BPS)</LabelWithTip>
-        <Input type="number" min="0" max="10000" value={form.discountRate} onChange={(e) => setForm((prev) => ({ ...prev, discountRate: e.target.value }))} placeholder="500" required />
-      </div>
-      <div className="space-y-1">
-        <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.commissionBonus')}>{t('levels.commissionBonus')} (BPS)</LabelWithTip>
-        <Input type="number" min="0" max="10000" value={form.commissionBonus} onChange={(e) => setForm((prev) => ({ ...prev, commissionBonus: e.target.value }))} placeholder="100" required />
-      </div>
-      <div className="flex items-end">
-        <Button type="submit" disabled={busy} className="w-full">{submitLabel}</Button>
-      </div>
+      {/* Referral & Team Thresholds */}
+      <details className="group">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+          {t('levels.referralThresholds')}
+        </summary>
+        <p className="mt-1 text-xs text-muted-foreground">{t('levels.referralThresholdsDesc')}</p>
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="space-y-1">
+            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minDirectReferrals')}>{t('levels.minDirectReferrals')}</LabelWithTip>
+            <Input type="number" min="0" value={form.minDirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minDirectReferrals: e.target.value }))} placeholder="0" />
+          </div>
+          <div className="space-y-1">
+            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minQualifiedReferrals')}>{t('levels.minQualifiedReferrals')}</LabelWithTip>
+            <Input type="number" min="0" value={form.minQualifiedReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minQualifiedReferrals: e.target.value }))} placeholder="0" />
+          </div>
+          <div className="space-y-1">
+            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minTeamSize')}>{t('levels.minTeamSize')}</LabelWithTip>
+            <Input type="number" min="0" value={form.minTeamSize} onChange={(e) => setForm((prev) => ({ ...prev, minTeamSize: e.target.value }))} placeholder="0" />
+          </div>
+          <div className="space-y-1">
+            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minIndirectReferrals')}>{t('levels.minIndirectReferrals')}</LabelWithTip>
+            <Input type="number" min="0" value={form.minIndirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minIndirectReferrals: e.target.value }))} placeholder="0" />
+          </div>
+          <div className="space-y-1">
+            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minQualifiedIndirectReferrals')}>{t('levels.minQualifiedIndirectReferrals')}</LabelWithTip>
+            <Input type="number" min="0" value={form.minQualifiedIndirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minQualifiedIndirectReferrals: e.target.value }))} placeholder="0" />
+          </div>
+        </div>
+      </details>
     </form>
   );
 }
@@ -191,12 +232,28 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
 
   const handleAdd = useCallback((data: LevelFormData) => {
     if (!shopId) return;
-    addCustomLevel.mutate([shopId, data.name, parseUsdtInput(data.threshold), Number(data.discountRate), Number(data.commissionBonus)]);
+    addCustomLevel.mutate([
+      shopId, data.name, parseUsdtInput(data.threshold),
+      Number(data.discountRate), Number(data.commissionBonus),
+      Number(data.minDirectReferrals) || 0,
+      Number(data.minQualifiedReferrals) || 0,
+      Number(data.minTeamSize) || 0,
+      Number(data.minIndirectReferrals) || 0,
+      Number(data.minQualifiedIndirectReferrals) || 0,
+    ]);
   }, [addCustomLevel, shopId]);
 
   const handleUpdate = useCallback((levelId: number, data: LevelFormData) => {
     if (!shopId) return;
-    updateCustomLevel.mutate([shopId, levelId, data.name, parseUsdtInput(data.threshold), Number(data.discountRate), Number(data.commissionBonus)]);
+    updateCustomLevel.mutate([
+      shopId, levelId, data.name, parseUsdtInput(data.threshold),
+      Number(data.discountRate), Number(data.commissionBonus),
+      Number(data.minDirectReferrals) || 0,
+      Number(data.minQualifiedReferrals) || 0,
+      Number(data.minTeamSize) || 0,
+      Number(data.minIndirectReferrals) || 0,
+      Number(data.minQualifiedIndirectReferrals) || 0,
+    ]);
     setEditId(null);
   }, [shopId, updateCustomLevel]);
 
@@ -302,6 +359,11 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
                           threshold: formatUsdt(level.threshold),
                           discountRate: String(level.discountRate),
                           commissionBonus: String(level.commissionBonus),
+                          minDirectReferrals: String(level.minDirectReferrals),
+                          minQualifiedReferrals: String(level.minQualifiedReferrals),
+                          minTeamSize: String(level.minTeamSize),
+                          minIndirectReferrals: String(level.minIndirectReferrals),
+                          minQualifiedIndirectReferrals: String(level.minQualifiedIndirectReferrals),
                         }}
                         onSubmit={(data) => handleUpdate(level.id, data)}
                         submitLabel={tc('save')}
@@ -309,18 +371,40 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
                       />
                     ) : (
                       <Card className="shadow-none">
-                        <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-6 sm:items-center">
-                          <span className="font-medium">
-                            {t('levels.levelId', { id: level.id })} {level.name}
-                          </span>
-                          <span className="text-sm">{formatUsdt(level.threshold)} USDT</span>
-                          <span className="text-sm">{bpsToPercent(level.discountRate)}%</span>
-                          <span className="text-sm">{bpsToPercent(level.commissionBonus)}%</span>
-                          <span className="text-sm">{t('levels.memberCount', { count: levelMemberCounts[level.id] ?? 0 })}</span>
-                          <div className="flex gap-1 sm:justify-end">
-                            <Button size="sm" variant="outline" onClick={() => setEditId(level.id)}>{tc('edit')}</Button>
-                            <Button size="sm" variant="destructive" onClick={() => handleDelete(level.id)} disabled={isTxBusy(deleteCustomLevel)}>{tc('delete')}</Button>
+                        <CardContent className="space-y-1 p-3">
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-6 sm:items-center">
+                            <span className="font-medium">
+                              {t('levels.levelId', { id: level.id })} {level.name}
+                            </span>
+                            <span className="text-sm">{formatUsdt(level.threshold)} USDT</span>
+                            <span className="text-sm">{bpsToPercent(level.discountRate)}%</span>
+                            <span className="text-sm">{bpsToPercent(level.commissionBonus)}%</span>
+                            <span className="text-sm">{t('levels.memberCount', { count: levelMemberCounts[level.id] ?? 0 })}</span>
+                            <div className="flex gap-1 sm:justify-end">
+                              <Button size="sm" variant="outline" onClick={() => setEditId(level.id)}>{tc('edit')}</Button>
+                              <Button size="sm" variant="destructive" onClick={() => handleDelete(level.id)} disabled={isTxBusy(deleteCustomLevel)}>{tc('delete')}</Button>
+                            </div>
                           </div>
+                          {/* Show non-zero referral/team thresholds */}
+                          {(level.minDirectReferrals > 0 || level.minQualifiedReferrals > 0 || level.minTeamSize > 0 || level.minIndirectReferrals > 0 || level.minQualifiedIndirectReferrals > 0) && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {level.minDirectReferrals > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minDirectReferrals')}: {level.minDirectReferrals}</Badge>
+                              )}
+                              {level.minQualifiedReferrals > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minQualifiedReferrals')}: {level.minQualifiedReferrals}</Badge>
+                              )}
+                              {level.minTeamSize > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minTeamSize')}: {level.minTeamSize}</Badge>
+                              )}
+                              {level.minIndirectReferrals > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minIndirectReferrals')}: {level.minIndirectReferrals}</Badge>
+                              )}
+                              {level.minQualifiedIndirectReferrals > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minQualifiedIndirectReferrals')}: {level.minQualifiedIndirectReferrals}</Badge>
+                              )}
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     )}

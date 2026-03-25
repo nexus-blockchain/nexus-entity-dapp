@@ -213,6 +213,9 @@ export function useGovernance() {
   const vote = useEntityMutation('entityGovernance', 'vote', { invalidateKeys });
   const finalizeVoting = useEntityMutation('entityGovernance', 'finalizeVoting', { invalidateKeys });
   const executeProposal = useEntityMutation('entityGovernance', 'executeProposal', { invalidateKeys });
+  const delegateVote = useEntityMutation('entityGovernance', 'delegateVote', { invalidateKeys });
+  const undelegateVote = useEntityMutation('entityGovernance', 'undelegateVote', { invalidateKeys });
+  const changeVote = useEntityMutation('entityGovernance', 'changeVote', { invalidateKeys });
 
   return {
     proposals: proposalsQuery.data ?? [],
@@ -225,5 +228,8 @@ export function useGovernance() {
     vote,
     finalizeVoting,
     executeProposal,
+    delegateVote,
+    undelegateVote,
+    changeVote,
   };
 }

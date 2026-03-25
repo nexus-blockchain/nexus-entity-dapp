@@ -122,7 +122,7 @@ export function useProduct(productId: number) {
       const raw = await (api.query as any).entityProduct.products(productId);
       return parseProductData(raw);
     },
-    { staleTime: STALE_TIMES.products, enabled: productId > 0 },
+    { staleTime: STALE_TIMES.products, enabled: productId >= 0 },
   );
 
   const shopId = productQuery.data?.shopId ?? 0;

@@ -7,6 +7,7 @@ import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useLevelDiffCommission } from '@/hooks/use-level-diff-commission';
+import { isTxBusy } from '@/hooks/use-tx-lock';
 
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -16,12 +17,6 @@ import { LabelWithTip } from '@/components/field-help-tip';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -55,12 +50,15 @@ function ConfigSection() {
   const { entityId } = useEntityContext();
   const { config, setLevelDiffConfig, clearLevelDiffConfig } = useLevelDiffCommission();
 
+  const isAnyBusy = isTxBusy(setLevelDiffConfig) || isTxBusy(clearLevelDiffConfig);
+
   const [levelRatesInput, setLevelRatesInput] = useState('');
   const [maxDepth, setMaxDepth] = useState('');
 
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isAnyBusy) return;
       const rates = levelRatesInput
         .split(',')
         .map((s) => s.trim())
@@ -77,9 +75,9 @@ function ConfigSection() {
   );
 
   const handleClear = useCallback(() => {
-    // clearLevelDiffConfig(entityId)
+    if (isAnyBusy) return;
     clearLevelDiffConfig.mutate([entityId]);
-  }, [entityId, clearLevelDiffConfig]);
+  }, [entityId, clearLevelDiffConfig, isAnyBusy]);
 
   return (
     <Card>
@@ -135,14 +133,14 @@ function ConfigSection() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(setLevelDiffConfig)}>
+              <Button type="submit" disabled={isAnyBusy}>
                 {t('saveConfig')}
               </Button>
               <Button
                 type="button"
                 variant="destructive"
                 onClick={handleClear}
-                disabled={isTxBusy(clearLevelDiffConfig)}
+                disabled={isAnyBusy}
               >
                 {t('clearConfig')}
               </Button>

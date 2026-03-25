@@ -136,6 +136,38 @@ export function useShops() {
     invalidateKeys: [['entity', entityId, 'shops']],
   });
 
+  const addShopManager = useEntityMutation('entityShop', 'addShopManager', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const removeShopManager = useEntityMutation('entityShop', 'removeShopManager', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const setShopLocation = useEntityMutation('entityShop', 'setShopLocation', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const finalizeCloseShop = useEntityMutation('entityShop', 'finalizeCloseShop', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const requestTransferShop = useEntityMutation('entityShop', 'requestTransferShop', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const acceptTransferShop = useEntityMutation('entityShop', 'acceptTransferShop', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const cancelTransferShop = useEntityMutation('entityShop', 'cancelTransferShop', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
+  const setShopType = useEntityMutation('entityShop', 'setShopType', {
+    invalidateKeys: [['entity', entityId, 'shops']],
+  });
+
   return {
     shops: shopsQuery.data ?? [],
     isLoading: shopIdsQuery.isLoading || shopsQuery.isLoading,
@@ -147,5 +179,13 @@ export function useShops() {
     resumeShop,
     depositFund,
     updateShop,
+    addShopManager,
+    removeShopManager,
+    setShopLocation,
+    finalizeCloseShop,
+    requestTransferShop,
+    acceptTransferShop,
+    cancelTransferShop,
+    setShopType,
   };
 }

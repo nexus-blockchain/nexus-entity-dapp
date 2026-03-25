@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useMembers } from '@/hooks/use-members';
 import { useShops } from '@/hooks/use-shops';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -24,10 +25,6 @@ import { LabelWithTip } from '@/components/field-help-tip';
 // ─── Helpers ────────────────────────────────────────────────
 
 const USDT_PRECISION = 1_000_000;
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 /** Format raw USDT amount (10^6 precision) to display string */
 function formatUsdt(raw: bigint | number): string {

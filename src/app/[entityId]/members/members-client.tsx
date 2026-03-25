@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useMembers } from '@/hooks/use-members';
 import { useShops } from '@/hooks/use-shops';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
+import { usePaginatedQuery } from '@/hooks/use-paginated-query';
+import { PaginationControls } from '@/components/pagination-controls';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -32,10 +35,6 @@ import { CopyableAddress } from '@/components/copyable-address';
 import { LabelWithTip } from '@/components/field-help-tip';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 const STATUS_BADGE_VARIANT: Record<MemberStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'; className?: string }> = {
   [MemberStatus.Active]: { variant: 'success' },
@@ -560,6 +559,7 @@ function MemberListSection({ shopId }: { shopId: number | null }) {
 function MemberTable({ members, expandedAccount, setExpandedAccount, shopId }: { members: ReturnType<typeof useMembers>['members']; expandedAccount: string | null; setExpandedAccount: (account: string | null) => void; shopId: number | null }) {
   const t = useTranslations('members');
   const te = useTranslations('enums');
+  const paginated = usePaginatedQuery(members, { pageSize: 20 });
 
   if (members.length === 0) {
     return (<div className="flex items-center justify-center py-8"><p className="text-sm text-muted-foreground">{t('noMembers')}</p></div>);
@@ -567,13 +567,14 @@ function MemberTable({ members, expandedAccount, setExpandedAccount, shopId }: {
 
   return (
     <div className="space-y-2">
-      {members.map((m) => (
+      {paginated.items.map((m) => (
         <Collapsible key={m.account} open={expandedAccount === m.account} onOpenChange={(open) => setExpandedAccount(open ? m.account : null)}>
           <Card className="shadow-none">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <CollapsibleTrigger asChild><Button variant="ghost" size="sm" className="font-mono text-sm"><CopyableAddress address={m.account} textClassName="text-xs" hideCopyIcon /></Button></CollapsibleTrigger>
+                  <CollapsibleTrigger asChild><Button variant="ghost" size="sm" className="font-mono text-xs">{m.account.slice(0, 6)}...{m.account.slice(-4)}</Button></CollapsibleTrigger>
+                  <CopyableAddress address={m.account} textClassName="text-xs" />
                   <Badge variant={STATUS_BADGE_VARIANT[m.status].variant} className={STATUS_BADGE_VARIANT[m.status].className}>{te(`memberStatus.${m.status}`)}</Badge>
                   <span className="text-xs text-muted-foreground">Lv.{m.level}</span>
                 </div>
@@ -589,6 +590,16 @@ function MemberTable({ members, expandedAccount, setExpandedAccount, shopId }: {
           </Card>
         </Collapsible>
       ))}
+      <PaginationControls
+        page={paginated.page}
+        totalPages={paginated.totalPages}
+        totalCount={paginated.totalCount}
+        hasNextPage={paginated.hasNextPage}
+        hasPrevPage={paginated.hasPrevPage}
+        onPrevPage={paginated.prevPage}
+        onNextPage={paginated.nextPage}
+        onSetPage={paginated.setPage}
+      />
     </div>
   );
 }

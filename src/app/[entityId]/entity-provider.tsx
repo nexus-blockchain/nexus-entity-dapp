@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { EntityContext, EntityData } from '@/lib/types/models';
 import { EntityStatus, EntityType, GovernanceMode } from '@/lib/types/enums';
 import { useEntityQuery } from '@/hooks/use-entity-query';
@@ -8,6 +8,7 @@ import { STALE_TIMES } from '@/lib/chain/constants';
 import { decodeChainString, decodeOptionalChainString, entityTreasuryAddress } from '@/lib/utils/codec';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useEntityDAppStore } from '@/stores/entity-dapp-store';
+import { TxLockProvider } from '@/hooks/use-tx-lock';
 
 const EntityCtx = createContext<EntityContext | null>(null);
 
@@ -121,6 +122,10 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
     return entity.status === EntityStatus.Suspended || entity.status === EntityStatus.Banned;
   }, [entity]);
 
+  // Global transaction lock — shared by all pages under this entity
+  const [txLocked, setTxLocked] = useState(false);
+  const txLockValue = useMemo(() => ({ isLocked: txLocked, setLocked: setTxLocked }), [txLocked]);
+
   // Sync to Zustand store
   useEffect(() => {
     if (entity) {
@@ -147,7 +152,13 @@ export function EntityProvider({ entityId, children }: EntityProviderProps) {
     [entityId, entity, entityLoading, permissionsLoading, entityError, permissions, isOwner, isReadOnly, isSuspended],
   );
 
-  return <EntityCtx.Provider value={value}>{children}</EntityCtx.Provider>;
+  return (
+    <EntityCtx.Provider value={value}>
+      <TxLockProvider value={txLockValue}>
+        {children}
+      </TxLockProvider>
+    </EntityCtx.Provider>
+  );
 }
 
 /** Hook to access the EntityContext. Must be used within EntityProvider. */

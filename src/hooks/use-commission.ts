@@ -5,7 +5,6 @@ import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
 import type {
-  CommissionConfig,
   CoreCommissionConfig,
   PluginBudgetCaps,
   EntityWithdrawalConfig,
@@ -74,26 +73,7 @@ function parseCoreCommissionConfig(raw: unknown): CoreCommissionConfig | null {
     withdrawalCooldown: Number(obj.withdrawalCooldown ?? obj.withdrawal_cooldown ?? 0),
     creatorRewardRate: Number(obj.creatorRewardRate ?? obj.creator_reward_rate ?? 0),
     tokenWithdrawalCooldown: Number(obj.tokenWithdrawalCooldown ?? obj.token_withdrawal_cooldown ?? 0),
-    pluginBudgetCaps: parsePluginBudgetCaps(obj.pluginBudgetCaps ?? obj.plugin_budget_caps ?? null),
-  };
-}
-
-/** @deprecated kept for backward compat */
-function parseCommissionConfig(raw: unknown): CommissionConfig | null {
-  const obj = unwrapRaw(raw);
-  if (!obj) return null;
-  const wc = obj.withdrawalConfig ?? obj.withdrawal_config ?? {};
-  return {
-    entityId: Number(obj.entityId ?? obj.entity_id ?? 0),
-    enabled: Boolean(obj.enabled),
-    baseRate: Number(obj.baseRate ?? obj.base_rate ?? 0),
-    enabledModes: Number(obj.enabledModes ?? obj.enabled_modes ?? 0),
-    withdrawalConfig: {
-      minAmount: BigInt(String(wc.minAmount ?? wc.min_amount ?? 0)),
-      feeRate: Number(wc.feeRate ?? wc.fee_rate ?? 0),
-      cooldown: Number(wc.cooldown ?? 0),
-    },
-    withdrawalPaused: Boolean(obj.withdrawalPaused ?? obj.withdrawal_paused),
+    pluginBudgetCaps: parsePluginBudgetCaps(obj.pluginCaps ?? obj.plugin_caps ?? obj.pluginBudgetCaps ?? obj.plugin_budget_caps ?? null),
   };
 }
 
@@ -166,47 +146,12 @@ function parseMemberTokenCommissionStats(raw: unknown): MemberTokenCommissionSta
   };
 }
 
-function parseWithdrawalRecords(rawEntries: [any, any][]): WithdrawalRecord[] {
-  if (!rawEntries || !Array.isArray(rawEntries)) return [];
-  return rawEntries.map(([_key, value]) => {
-    const obj = value?.toJSON?.() ?? value;
-    return {
-      amount: BigInt(String(obj.amount ?? 0)),
-      repurchaseAmount: BigInt(String(obj.repurchaseAmount ?? obj.repurchase_amount ?? 0)),
-      block: Number(obj.block ?? obj.blockNumber ?? obj.block_number ?? 0),
-    };
-  });
-}
-
-function parseTokenWithdrawalRecords(rawEntries: [any, any][]): TokenWithdrawalRecord[] {
-  if (!rawEntries || !Array.isArray(rawEntries)) return [];
-  return rawEntries.map(([_key, value]) => {
-    const obj = value?.toJSON?.() ?? value;
-    return {
-      amount: BigInt(String(obj.amount ?? 0)),
-      repurchaseAmount: BigInt(String(obj.repurchaseAmount ?? obj.repurchase_amount ?? 0)),
-      block: Number(obj.block ?? obj.blockNumber ?? obj.block_number ?? 0),
-    };
-  });
-}
-
 function parseShopCommissionTotals(raw: unknown): ShopCommissionTotals | null {
   const obj = unwrapRaw(raw);
   if (!obj) return null;
   return {
     totalDistributed: BigInt(String(obj.totalDistributed ?? obj.total_distributed ?? 0)),
     totalOrders: Number(obj.totalOrders ?? obj.total_orders ?? 0),
-  };
-}
-
-function parseMemberCommission(raw: unknown): { nexEarned: bigint; tokenEarned: bigint } {
-  if (!raw || (raw as { isNone?: boolean }).isNone) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
-  const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
-  if (!unwrapped) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
-  const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  return {
-    nexEarned: BigInt(String(obj.nexEarned ?? obj.nex_earned ?? obj.totalEarned ?? obj.total_earned ?? 0)),
-    tokenEarned: BigInt(String(obj.tokenEarned ?? obj.token_earned ?? 0)),
   };
 }
 
@@ -245,19 +190,6 @@ export function useCommission() {
     { staleTime: STALE_TIMES.members },
   );
 
-  /** @deprecated use coreConfig instead */
-  const configQuery = useEntityQuery<CommissionConfig | null>(
-    ['entity', entityId, 'commission'],
-    async (api) => {
-      if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].commissionConfigs;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return parseCommissionConfig(raw);
-    },
-    { staleTime: STALE_TIMES.members },
-  );
-
   // ─── Withdrawal Config Queries ────────────────────────
 
   const withdrawalConfigQuery = useEntityQuery<EntityWithdrawalConfig | null>(
@@ -292,14 +224,17 @@ export function useCommission() {
       async (api) => {
         if (!hasPallet(api, PALLET)) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
         if (!account) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
-        // memberCommissions no longer in chain; derive from memberCommissionStats
-        const fn = (api.query as any)[PALLET].memberCommissionStats;
-        if (!fn) return { nexEarned: BigInt(0), tokenEarned: BigInt(0) };
-        const raw = await fn(entityId, account);
-        const stats = parseMemberCommissionStats(raw);
+        const statsFn = (api.query as any)[PALLET].memberCommissionStats;
+        const tokenStatsFn = (api.query as any)[PALLET].memberTokenCommissionStats;
+        const [statsRaw, tokenStatsRaw] = await Promise.all([
+          statsFn ? statsFn(entityId, account) : null,
+          tokenStatsFn ? tokenStatsFn(entityId, account) : null,
+        ]);
+        const stats = parseMemberCommissionStats(statsRaw);
+        const tokenStats = parseMemberTokenCommissionStats(tokenStatsRaw);
         return {
           nexEarned: stats?.totalEarned ?? BigInt(0),
-          tokenEarned: BigInt(0),
+          tokenEarned: tokenStats?.totalEarned ?? BigInt(0),
         };
       },
       { staleTime: STALE_TIMES.members, enabled: !!account },
@@ -487,10 +422,17 @@ export function useCommission() {
       async (api) => {
         if (!hasPallet(api, PALLET) || !account) return [];
         const fn = (api.query as any)[PALLET].memberWithdrawalHistory;
-        if (!fn?.entries) return [];
+        if (!fn) return [];
         try {
-          const raw = await fn.entries(entityId, account);
-          return parseWithdrawalRecords(raw);
+          const raw = await fn(entityId, account);
+          if (!raw || raw.isNone) return [];
+          const arr = raw.toJSON?.() ?? raw;
+          if (!Array.isArray(arr)) return [];
+          return arr.map((item: any) => ({
+            amount: BigInt(String(item.amount ?? 0)),
+            repurchaseAmount: BigInt(String(item.repurchaseAmount ?? item.repurchase_amount ?? 0)),
+            block: Number(item.block ?? item.blockNumber ?? item.block_number ?? 0),
+          }));
         } catch {
           return [];
         }
@@ -504,10 +446,17 @@ export function useCommission() {
       async (api) => {
         if (!hasPallet(api, PALLET) || !account) return [];
         const fn = (api.query as any)[PALLET].memberTokenWithdrawalHistory;
-        if (!fn?.entries) return [];
+        if (!fn) return [];
         try {
-          const raw = await fn.entries(entityId, account);
-          return parseTokenWithdrawalRecords(raw);
+          const raw = await fn(entityId, account);
+          if (!raw || raw.isNone) return [];
+          const arr = raw.toJSON?.() ?? raw;
+          if (!Array.isArray(arr)) return [];
+          return arr.map((item: any) => ({
+            amount: BigInt(String(item.amount ?? 0)),
+            repurchaseAmount: BigInt(String(item.repurchaseAmount ?? item.repurchase_amount ?? 0)),
+            block: Number(item.block ?? item.blockNumber ?? item.block_number ?? 0),
+          }));
         } catch {
           return [];
         }
@@ -641,12 +590,18 @@ export function useCommission() {
   const forceEnableEntityCommission = useEntityMutation(PALLET, 'forceEnableEntityCommission', { invalidateKeys });
   const forceGlobalPause = useEntityMutation(PALLET, 'forceGlobalPause', { invalidateKeys });
   const retryCancelCommission = useEntityMutation(PALLET, 'retryCancelCommission', { invalidateKeys });
+  const setProductRate = useEntityMutation(PALLET, 'setProductCommissionRate', { invalidateKeys });
+  const setShopRate = useEntityMutation(PALLET, 'setShopCommissionRate', { invalidateKeys });
+
+  // Missing extrinsics added
+  const retryPendingRefund = useEntityMutation(PALLET, 'retryPendingRefund', { invalidateKeys });
+  const retryPendingTokenRefund = useEntityMutation(PALLET, 'retryPendingTokenRefund', { invalidateKeys });
+  const setReferrerExemptThreshold = useEntityMutation(PALLET, 'setReferrerExemptThreshold', { invalidateKeys });
+  const setReferrerPayoutDisabled = useEntityMutation(PALLET, 'setReferrerPayoutDisabled', { invalidateKeys });
 
   return {
     // Core config
     coreConfig: coreConfigQuery.data ?? null,
-    /** @deprecated use coreConfig */
-    config: configQuery.data ?? null,
 
     // Withdrawal configs
     withdrawalConfig: withdrawalConfigQuery.data ?? null,
@@ -723,6 +678,10 @@ export function useCommission() {
     forceEnableEntityCommission,
     forceGlobalPause,
     retryCancelCommission,
+    retryPendingRefund,
+    retryPendingTokenRefund,
+    setReferrerExemptThreshold,
+    setReferrerPayoutDisabled,
   };
 }
 
@@ -748,7 +707,7 @@ export function useProductCommissionRate(productId: number, shopId: number) {
       const raw = await fn(productId);
       return unwrapOptionU16(raw);
     },
-    { enabled: productId > 0 },
+    { enabled: productId >= 0 },
   );
 
   const shopRateQuery = useEntityQuery<number | null>(

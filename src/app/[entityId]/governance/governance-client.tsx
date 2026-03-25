@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useGovernance, computeProposalResult } from '@/hooks/use-governance';
 import { useIpfsUpload } from '@/hooks/use-ipfs-upload';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -165,10 +166,6 @@ const PROPOSAL_TYPES_KEYS: Record<string, { types: Record<string, ProposalTypeIn
 };
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'> = {
   Voting: 'default',

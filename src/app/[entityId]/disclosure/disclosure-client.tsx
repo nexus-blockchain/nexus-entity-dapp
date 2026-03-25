@@ -13,6 +13,7 @@ import {
   AuditStatus,
 } from '@/lib/types/enums';
 import { useCurrentBlock } from '@/hooks/use-current-block';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -34,10 +35,6 @@ import {
 } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 const DISCLOSURE_LEVELS: DisclosureLevel[] = [
   DisclosureLevel.Basic,

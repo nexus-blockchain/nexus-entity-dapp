@@ -131,6 +131,10 @@ export interface OrderData {
   paymentAsset: PaymentAsset;
   totalAmount: bigint;
   platformFee: bigint;
+  usdtTotal: bigint;
+  nexUsdtRate: bigint;
+  tokenNexRate: bigint;
+  tokenPaymentAmount: bigint;
   productCategory: ProductCategory;
   status: OrderStatus;
   escrowId: number | null;
@@ -393,19 +397,19 @@ export interface ReferralValidityConfig {
   validOrders: number;
 }
 
-// 多级佣金层级
+// 多级佣金层级（与链端 MultiLevelTier 一致）
 export interface MultiLevelTier {
   rate: number;
-  requiredDirects: number;
-  requiredTeamSize: number;
-  requiredSpent: bigint;
-  requiredLevelId: number;
+  directMin: number;
+  teamMin: number;
+  spentMin: bigint;
+  levelMin: number;
 }
 
-// 多级佣金配置
+// 多级佣金配置（与链端 MultiLevelConfig 一致）
 export interface MultiLevelConfig {
   tiers: MultiLevelTier[];
-  maxTotalRate: number;
+  maxLevelsDeep: number;
 }
 
 // 多级佣金统计
@@ -488,7 +492,7 @@ export interface LevelBasedLevels {
   downlineLevels: number;
 }
 
-// 团队佣金配置
+// 团队佣金配置（与链端 TeamPerformanceConfig 一致）
 export interface TeamConfig {
   enabled: boolean;
   tiers: TeamTier[];
@@ -497,12 +501,11 @@ export interface TeamConfig {
   thresholdMode: SalesThresholdMode;
 }
 
-// 团队层级
+// 团队层级（与链端 TeamPerformanceTier 一致）
 export interface TeamTier {
-  tier: number;
+  salesThreshold: bigint;
+  minTeamSize: number;
   rate: number;
-  minTeamPerformance: bigint;
-  minDirectCount: number;
 }
 
 // 团队佣金统计

@@ -248,6 +248,7 @@ export function usePoolRewardCommission() {
   const claimPoolReward = useEntityMutation(PALLET, 'claimPoolReward', { invalidateKeys: claimInvalidateKeys });
   const pausePoolReward = useEntityMutation(PALLET, 'pausePoolReward', { invalidateKeys });
   const resumePoolReward = useEntityMutation(PALLET, 'resumePoolReward', { invalidateKeys });
+  const setTokenPoolEnabled = useEntityMutation(PALLET, 'setTokenPoolEnabled', { invalidateKeys });
 
   return {
     config: configQuery.data ?? null,
@@ -266,5 +267,6 @@ export function usePoolRewardCommission() {
     claimPoolReward,
     pausePoolReward,
     resumePoolReward,
+    setTokenPoolEnabled,
   };
 }

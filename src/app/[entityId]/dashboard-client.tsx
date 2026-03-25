@@ -260,7 +260,7 @@ function GovernanceSummaryCard({ entityId }: { entityId: number }) {
 // ─── Commission Summary Card ─────────────────────────────────
 
 function CommissionSummaryCard({ entityId }: { entityId: number }) {
-  const { config, isLoading } = useCommission();
+  const { coreConfig, isLoading, isWithdrawalPaused } = useCommission();
   const t = useTranslations('dashboard');
 
   if (isLoading) {
@@ -276,7 +276,7 @@ function CommissionSummaryCard({ entityId }: { entityId: number }) {
     );
   }
 
-  if (!config) {
+  if (!coreConfig) {
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -292,8 +292,8 @@ function CommissionSummaryCard({ entityId }: { entityId: number }) {
     );
   }
 
-  const enabledPluginCount = [0x001, 0x002, 0x008, 0x080, 0x004, 0x200].filter(
-    (bit) => (config.enabledModes & bit) !== 0,
+  const enabledPluginCount = [0x071, 0x002, 0x008, 0x180, 0x004, 0x200].filter(
+    (bit) => (coreConfig.enabledModes & bit) !== 0,
   ).length;
 
   return (
@@ -308,13 +308,13 @@ function CommissionSummaryCard({ entityId }: { entityId: number }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('withdrawalStatus')}</p>
-            <Badge variant={config.enabled ? 'success' : 'secondary'} className="text-xs">
-              {config.enabled ? t('enabled') : t('disabled')}
+            <Badge variant={coreConfig.enabled ? 'success' : 'secondary'} className="text-xs">
+              {coreConfig.enabled ? t('enabled') : t('disabled')}
             </Badge>
           </div>
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('baseRate')}</p>
-            <p className="text-sm font-semibold">{config.baseRate} bps</p>
+            <p className="text-sm font-semibold">{coreConfig.maxCommissionRate} bps</p>
           </div>
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('enabledPlugins')}</p>
@@ -322,8 +322,8 @@ function CommissionSummaryCard({ entityId }: { entityId: number }) {
           </div>
           <div className="space-y-0.5">
             <p className="text-xs text-muted-foreground">{t('withdrawalStatus')}</p>
-            <Badge variant={config.withdrawalPaused ? 'destructive' : 'success'} className="text-xs">
-              {config.withdrawalPaused ? t('paused') : t('normal')}
+            <Badge variant={isWithdrawalPaused ? 'destructive' : 'success'} className="text-xs">
+              {isWithdrawalPaused ? t('paused') : t('normal')}
             </Badge>
           </div>
         </div>

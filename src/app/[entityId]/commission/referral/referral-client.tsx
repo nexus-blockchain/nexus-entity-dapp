@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
@@ -8,6 +8,7 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useReferralCommission } from '@/hooks/use-referral-commission';
 import { useWalletStore } from '@/stores/wallet-store';
+import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 import { useTranslations } from 'next-intl';
 import { formatNex } from '@/lib/utils/format';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -19,12 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -57,38 +52,36 @@ function ConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { config, setDirectRewardConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [rewardRate, setRewardRateVal] = useState('');
+
+  const localBusy = isTxBusy(setDirectRewardConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setDirectRewardConfig.mutate([
         entityId,
         Number(rewardRate) || config?.rewardRate || 0,
       ]);
     },
-    [entityId, rewardRate, config, setDirectRewardConfig],
+    [entityId, rewardRate, config, setDirectRewardConfig, isLocked],
   );
 
   const handleToggle = useCallback(() => {
-    // Use setDirectRewardConfig to toggle enable/disable
-    // When enabling, use current rewardRate or form value
-    // When disabling, set rate to 0 to effectively disable
+    if (isLocked) return;
     if (config?.enabled) {
-      // Disable by setting rate to 0
       setDirectRewardConfig.mutate([entityId, 0]);
     } else {
-      // Enable with current or default rate
       setDirectRewardConfig.mutate([
         entityId,
         Number(rewardRate) || config?.rewardRate || 0,
       ]);
     }
-  }, [entityId, config, rewardRate, setDirectRewardConfig]);
-
-  const isToggleBusy = isTxBusy(setDirectRewardConfig);
-  const toggleTxState = setDirectRewardConfig.txState;
+  }, [entityId, config, rewardRate, setDirectRewardConfig, isLocked]);
 
   return (
     <Card>
@@ -117,10 +110,10 @@ function ConfigSection() {
             <Switch
               checked={config?.enabled ?? false}
               onCheckedChange={handleToggle}
-              disabled={isToggleBusy}
+              disabled={isLocked}
             />
             <Label>{t('enableToggle')}</Label>
-            <TxStatusIndicator txState={toggleTxState} />
+            <TxStatusIndicator txState={setDirectRewardConfig.txState} />
           </div>
 
           <Separator className="my-4" />
@@ -138,7 +131,7 @@ function ConfigSection() {
               <p className="text-xs text-muted-foreground">{t('rewardRateDesc')}</p>
             </div>
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(setDirectRewardConfig)}>
+              <Button type="submit" disabled={isLocked}>
                 {t('saveConfig')}
               </Button>
               <TxStatusIndicator txState={setDirectRewardConfig.txState} />
@@ -156,16 +149,21 @@ function FixedAmountConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { setFixedAmountConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [fixedAmount, setFixedAmount] = useState('');
+
+  const localBusy = isTxBusy(setFixedAmountConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       if (!fixedAmount.trim()) return;
       setFixedAmountConfig.mutate([entityId, fixedAmount]);
     },
-    [entityId, fixedAmount, setFixedAmountConfig],
+    [entityId, fixedAmount, setFixedAmountConfig, isLocked],
   );
 
   return (
@@ -188,7 +186,7 @@ function FixedAmountConfigSection() {
             />
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setFixedAmountConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setFixedAmountConfig')}
             </Button>
             <TxStatusIndicator txState={setFixedAmountConfig.txState} />
@@ -205,14 +203,19 @@ function FirstOrderConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { setFirstOrderConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [amount, setAmount] = useState('');
   const [rate, setRate] = useState('');
   const [useAmount, setUseAmount] = useState(false);
 
+  const localBusy = isTxBusy(setFirstOrderConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setFirstOrderConfig.mutate([
         entityId,
         amount.trim() || '0',
@@ -220,7 +223,7 @@ function FirstOrderConfigSection() {
         useAmount,
       ]);
     },
-    [entityId, amount, rate, useAmount, setFirstOrderConfig],
+    [entityId, amount, rate, useAmount, setFirstOrderConfig, isLocked],
   );
 
   return (
@@ -262,7 +265,7 @@ function FirstOrderConfigSection() {
             <Label>{t('useAmount')}</Label>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setFirstOrderConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setFirstOrderConfig')}
             </Button>
             <TxStatusIndicator txState={setFirstOrderConfig.txState} />
@@ -279,20 +282,25 @@ function RepeatPurchaseConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { setRepeatPurchaseConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [rate, setRate] = useState('');
   const [minOrders, setMinOrders] = useState('');
 
+  const localBusy = isTxBusy(setRepeatPurchaseConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setRepeatPurchaseConfig.mutate([
         entityId,
         Number(rate) || 0,
         Number(minOrders) || 0,
       ]);
     },
-    [entityId, rate, minOrders, setRepeatPurchaseConfig],
+    [entityId, rate, minOrders, setRepeatPurchaseConfig, isLocked],
   );
 
   return (
@@ -326,7 +334,7 @@ function RepeatPurchaseConfigSection() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setRepeatPurchaseConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setRepeatPurchaseConfig')}
             </Button>
             <TxStatusIndicator txState={setRepeatPurchaseConfig.txState} />
@@ -343,20 +351,25 @@ function ReferrerGuardConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { guardConfig, setReferrerGuardConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [minSpent, setMinSpent] = useState('');
   const [minOrders, setMinOrders] = useState('');
 
+  const localBusy = isTxBusy(setReferrerGuardConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setReferrerGuardConfig.mutate([
         entityId,
         minSpent.trim() || '0',
         Number(minOrders) || 0,
       ]);
     },
-    [entityId, minSpent, minOrders, setReferrerGuardConfig],
+    [entityId, minSpent, minOrders, setReferrerGuardConfig, isLocked],
   );
 
   return (
@@ -404,7 +417,7 @@ function ReferrerGuardConfigSection() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setReferrerGuardConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setReferrerGuardConfig')}
             </Button>
             <TxStatusIndicator txState={setReferrerGuardConfig.txState} />
@@ -421,20 +434,25 @@ function CommissionCapConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { capConfig, setCommissionCapConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [maxPerOrder, setMaxPerOrder] = useState('');
   const [maxTotalEarned, setMaxTotalEarned] = useState('');
 
+  const localBusy = isTxBusy(setCommissionCapConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setCommissionCapConfig.mutate([
         entityId,
         maxPerOrder.trim() || '0',
         maxTotalEarned.trim() || '0',
       ]);
     },
-    [entityId, maxPerOrder, maxTotalEarned, setCommissionCapConfig],
+    [entityId, maxPerOrder, maxTotalEarned, setCommissionCapConfig, isLocked],
   );
 
   return (
@@ -483,7 +501,7 @@ function CommissionCapConfigSection() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setCommissionCapConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setCommissionCapConfig')}
             </Button>
             <TxStatusIndicator txState={setCommissionCapConfig.txState} />
@@ -500,20 +518,25 @@ function ReferralValidityConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { validityConfig, setReferralValidityConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [validityBlocks, setValidityBlocks] = useState('');
   const [validOrders, setValidOrders] = useState('');
 
+  const localBusy = isTxBusy(setReferralValidityConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setReferralValidityConfig.mutate([
         entityId,
         Number(validityBlocks) || 0,
         Number(validOrders) || 0,
       ]);
     },
-    [entityId, validityBlocks, validOrders, setReferralValidityConfig],
+    [entityId, validityBlocks, validOrders, setReferralValidityConfig, isLocked],
   );
 
   return (
@@ -560,7 +583,7 @@ function ReferralValidityConfigSection() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setReferralValidityConfig)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setReferralValidityConfig')}
             </Button>
             <TxStatusIndicator txState={setReferralValidityConfig.txState} />
@@ -577,10 +600,15 @@ function ClearConfigSection() {
   const t = useTranslations('referral');
   const { entityId } = useEntityContext();
   const { clearReferralConfig } = useReferralCommission();
+  const { isLocked, setLocked } = useTxLock();
+
+  const localBusy = isTxBusy(clearReferralConfig);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const handleClear = useCallback(() => {
+    if (isLocked) return;
     clearReferralConfig.mutate([entityId]);
-  }, [entityId, clearReferralConfig]);
+  }, [entityId, clearReferralConfig, isLocked]);
 
   return (
     <Card>
@@ -590,7 +618,7 @@ function ClearConfigSection() {
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-3">
-          <Button variant="destructive" onClick={handleClear} disabled={isTxBusy(clearReferralConfig)}>
+          <Button variant="destructive" onClick={handleClear} disabled={isLocked}>
             {t('clearConfig')}
           </Button>
           <TxStatusIndicator txState={clearReferralConfig.txState} />
@@ -715,30 +743,30 @@ export function ReferralPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
-        <Link href={`/${entityId}/commission`}>
-          <Button variant="outline" size="sm">{t('backToCommission')}</Button>
-        </Link>
-      </div>
-
-      <ConfigSection />
-
-      <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
-        <div className="space-y-6">
-          <FixedAmountConfigSection />
-          <FirstOrderConfigSection />
-          <RepeatPurchaseConfigSection />
-          <ReferrerGuardConfigSection />
-          <CommissionCapConfigSection />
-          <ReferralValidityConfigSection />
-          <ClearConfigSection />
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">{t('title')}</h1>
+          <Link href={`/${entityId}/commission`}>
+            <Button variant="outline" size="sm">{t('backToCommission')}</Button>
+          </Link>
         </div>
-      </PermissionGuard>
 
-      <StatsSection />
-      <MyReferralSection />
-    </div>
+        <ConfigSection />
+
+        <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
+          <div className="space-y-6">
+            <FixedAmountConfigSection />
+            <FirstOrderConfigSection />
+            <RepeatPurchaseConfigSection />
+            <ReferrerGuardConfigSection />
+            <CommissionCapConfigSection />
+            <ReferralValidityConfigSection />
+            <ClearConfigSection />
+          </div>
+        </PermissionGuard>
+
+        <StatsSection />
+        <MyReferralSection />
+      </div>
   );
 }

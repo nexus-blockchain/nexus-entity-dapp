@@ -4,6 +4,7 @@ import React, { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,10 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LabelWithTip } from '@/components/field-help-tip';
 import { AdminPermission } from '@/lib/types/models';
-
-function isTxBusy(mutation: { txState: { status: string } }): boolean {
-  return mutation.txState.status === 'signing' || mutation.txState.status === 'broadcasting';
-}
 
 function LockTokensSection() {
   const t = useTranslations('token');

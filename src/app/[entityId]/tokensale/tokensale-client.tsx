@@ -6,6 +6,7 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { useTokensale, computeDutchAuctionPrice } from '@/hooks/use-tokensale';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { AdminPermission } from '@/lib/types/models';
 import { SaleMode } from '@/lib/types/enums';
 import { Badge } from '@/components/ui/badge';
@@ -36,10 +37,6 @@ type SaleRoundFormKey =
   | 'kycRequired'
   | 'minKycLevel'
   | 'softCap';
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 function TokenSaleSkeleton() {
   return (

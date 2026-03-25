@@ -6,6 +6,7 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { hasPallet, useEntityQuery } from '@/hooks/use-entity-query';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityToken } from '@/hooks/use-entity-token';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,10 +31,6 @@ function parsePendingDividendAmount(raw: unknown): bigint {
   }
 
   return BigInt(String(plain ?? 0));
-}
-
-function isTxBusy(mutation: { txState: { status: string } }): boolean {
-  return mutation.txState.status === 'signing' || mutation.txState.status === 'broadcasting';
 }
 
 function parseRecipients(input: string): Array<[string, string]> {

@@ -92,6 +92,10 @@ function parseOrderData(raw: unknown): OrderData | null {
     paymentAsset: String(obj.paymentAsset ?? obj.payment_asset ?? 'Native') as PaymentAsset,
     totalAmount: BigInt(String(obj.totalAmount ?? obj.total_amount ?? 0)),
     platformFee: BigInt(String(obj.platformFee ?? obj.platform_fee ?? 0)),
+    usdtTotal: BigInt(String(obj.usdtTotal ?? obj.usdt_total ?? 0)),
+    nexUsdtRate: BigInt(String(obj.nexUsdtRate ?? obj.nex_usdt_rate ?? 0)),
+    tokenNexRate: BigInt(String(obj.tokenNexRate ?? obj.token_nex_rate ?? 0)),
+    tokenPaymentAmount: BigInt(String(obj.tokenPaymentAmount ?? obj.token_payment_amount ?? 0)),
     productCategory: String(obj.productCategory ?? obj.product_category ?? 'Physical') as ProductCategory,
     status: String(obj.status ?? 'Created') as OrderStatus,
     escrowId: parseOptionalNumber(obj.escrowId ?? obj.escrow_id),
@@ -169,6 +173,21 @@ export function useShopOrders(shopId: number) {
   const cleanupShopOrders = useEntityMutation('entityTransaction', 'cleanupShopOrders', {
     invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
   });
+  const rejectRefund = useEntityMutation('entityTransaction', 'rejectRefund', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
+  });
+  const updateShippingAddress = useEntityMutation('entityTransaction', 'updateShippingAddress', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
+  });
+  const updateTracking = useEntityMutation('entityTransaction', 'updateTracking', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
+  });
+  const sellerRefundOrder = useEntityMutation('entityTransaction', 'sellerRefundOrder', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
+  });
+  const extendConfirmTimeout = useEntityMutation('entityTransaction', 'extendConfirmTimeout', {
+    invalidateKeys: [['entity', entityId, 'shop', shopId, 'orders']],
+  });
 
   return {
     orders: ordersQuery.data ?? [],
@@ -182,6 +201,11 @@ export function useShopOrders(shopId: number) {
     startService,
     completeService,
     cleanupShopOrders,
+    rejectRefund,
+    updateShippingAddress,
+    updateTracking,
+    sellerRefundOrder,
+    extendConfirmTimeout,
   };
 }
 

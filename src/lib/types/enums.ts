@@ -192,11 +192,10 @@ export enum InsiderRole {
   MajorHolder = 'MajorHolder',
 }
 
-// 团队业绩阈值模式
+// 团队业绩阈值数据源模式（与链端 SalesThresholdMode 一致）
 export enum SalesThresholdMode {
-  PersonalOnly = 'PersonalOnly',
-  TeamTotal = 'TeamTotal',
-  WeightedMix = 'WeightedMix',
+  Nex = 'Nex',
+  Usdt = 'Usdt',
 }
 
 // 提现模式 - 4 种

@@ -32,18 +32,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
-
 const PLUGIN_LIST: { key: CommissionPlugin; bit: number; route: string }[] = [
-  { key: CommissionPlugin.Referral, bit: 0x001, route: 'referral' },
+  { key: CommissionPlugin.Referral, bit: 0x071, route: 'referral' },       // DIRECT_REWARD|FIXED_AMOUNT|FIRST_ORDER|REPEAT_PURCHASE
   { key: CommissionPlugin.MultiLevel, bit: 0x002, route: 'multilevel' },
   { key: CommissionPlugin.LevelDiff, bit: 0x008, route: 'leveldiff' },
-  { key: CommissionPlugin.SingleLine, bit: 0x080, route: 'singleline' },
+  { key: CommissionPlugin.SingleLine, bit: 0x180, route: 'singleline' },   // SINGLE_LINE_UPLINE|SINGLE_LINE_DOWNLINE
   { key: CommissionPlugin.Team, bit: 0x004, route: 'team' },
   { key: CommissionPlugin.PoolReward, bit: 0x200, route: 'poolreward' },
 ];
@@ -136,13 +133,17 @@ function OverviewSection() {
   const { entityId } = useEntityContext();
   const {
     coreConfig,
-    config,
+    isWithdrawalPaused,
     globalCommissionPaused,
     enableCommission,
     setCommissionRate,
     setCreatorRewardRate,
     setWithdrawalCooldown,
   } = useCommission();
+
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(enableCommission) || isTxBusy(setCommissionRate) || isTxBusy(setCreatorRewardRate) || isTxBusy(setWithdrawalCooldown);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const [rate, setRate] = useState('');
   const [creatorRate, setCreatorRate] = useState('');
@@ -152,41 +153,41 @@ function OverviewSection() {
   const handleSetRate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!rate.trim()) return;
+      if (isLocked || !rate.trim()) return;
       setCommissionRate.mutate([entityId, Number(rate)]);
       setRate('');
     },
-    [entityId, rate, setCommissionRate],
+    [entityId, rate, setCommissionRate, isLocked],
   );
 
   const handleSetCreatorRate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!creatorRate.trim()) return;
+      if (isLocked || !creatorRate.trim()) return;
       setCreatorRewardRate.mutate([entityId, Number(creatorRate)]);
       setCreatorRate('');
     },
-    [entityId, creatorRate, setCreatorRewardRate],
+    [entityId, creatorRate, setCreatorRewardRate, isLocked],
   );
 
   const handleSetCooldown = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       const nex = cooldownNex.trim() ? Number(cooldownNex) : null;
       const token = cooldownToken.trim() ? Number(cooldownToken) : null;
-      if (nex !== null) {
-        setWithdrawalCooldown.mutate([entityId, nex]);
-      }
-      if (token !== null) {
-        setWithdrawalCooldown.mutate([entityId, token]);
-      }
+      if (nex === null && token === null) return;
+      // Pallet accepts both values in a single call; use current chain value for omitted field
+      const nexVal = nex ?? (coreConfig?.withdrawalCooldown ?? 0);
+      const tokenVal = token ?? (coreConfig?.tokenWithdrawalCooldown ?? 0);
+      setWithdrawalCooldown.mutate([entityId, nexVal, tokenVal]);
       setCooldownNex('');
       setCooldownToken('');
     },
-    [entityId, cooldownNex, cooldownToken, setWithdrawalCooldown],
+    [entityId, cooldownNex, cooldownToken, setWithdrawalCooldown, isLocked, coreConfig],
   );
 
-  const enabledModes = coreConfig?.enabledModes ?? config?.enabledModes ?? 0;
+  const enabledModes = coreConfig?.enabledModes ?? 0;
 
   return (
     <Card>
@@ -245,15 +246,15 @@ function OverviewSection() {
           {/* Withdrawal status */}
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t('withdrawalStatus')}</p>
-            <Badge variant={config?.withdrawalPaused ? 'destructive' : 'success'}>
-              {config?.withdrawalPaused ? t('withdrawalPaused') : t('withdrawalNormal')}
+            <Badge variant={isWithdrawalPaused ? 'destructive' : 'success'}>
+              {isWithdrawalPaused ? t('withdrawalPaused') : t('withdrawalNormal')}
             </Badge>
           </div>
 
           {/* Base rate (legacy) */}
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t('baseRate')}</p>
-            <p className="text-sm font-medium">{config?.baseRate ?? 0}</p>
+            <p className="text-sm font-medium">{coreConfig?.maxCommissionRate ?? 0}</p>
           </div>
         </div>
 
@@ -283,8 +284,8 @@ function OverviewSection() {
             <Button
               variant={coreConfig?.enabled ? 'destructive' : 'default'}
               size="sm"
-              onClick={() => enableCommission.mutate([entityId, !coreConfig?.enabled])}
-              disabled={isTxBusy(enableCommission)}
+              onClick={() => { if (!isLocked) enableCommission.mutate([entityId, !coreConfig?.enabled]); }}
+              disabled={isLocked}
             >
               {coreConfig?.enabled ? t('suspendEnable') : t('reEnable')}
             </Button>
@@ -306,7 +307,7 @@ function OverviewSection() {
                 className="w-40"
               />
             </div>
-            <Button type="submit" disabled={isTxBusy(setCommissionRate)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setRate')}
             </Button>
             <TxStatusIndicator txState={setCommissionRate.txState} />
@@ -325,7 +326,7 @@ function OverviewSection() {
                 className="w-40"
               />
             </div>
-            <Button type="submit" disabled={isTxBusy(setCreatorRewardRate)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setCreatorRewardRate')}
             </Button>
             <TxStatusIndicator txState={setCreatorRewardRate.txState} />
@@ -355,7 +356,7 @@ function OverviewSection() {
                 className="w-40"
               />
             </div>
-            <Button type="submit" disabled={isTxBusy(setWithdrawalCooldown)}>
+            <Button type="submit" disabled={isLocked}>
               {t('setWithdrawalCooldown')}
             </Button>
             <TxStatusIndicator txState={setWithdrawalCooldown.txState} />
@@ -574,8 +575,12 @@ function PluginSection() {
   const tc = useTranslations('common');
   const te = useTranslations('enums');
   const { entityId } = useEntityContext();
-  const { coreConfig, config, setCommissionModes, setPluginBudgetCaps } = useCommission();
-  const enabledModes = coreConfig?.enabledModes ?? config?.enabledModes ?? 0;
+  const { coreConfig, setCommissionModes, setPluginBudgetCaps } = useCommission();
+  const enabledModes = coreConfig?.enabledModes ?? 0;
+
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(setCommissionModes) || isTxBusy(setPluginBudgetCaps);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   // Budget caps local state - initialized from chain
   const [caps, setCaps] = useState<Record<PluginCapKey, string>>({
@@ -585,12 +590,9 @@ function PluginSection() {
     singleLineCap: '',
     teamCap: '',
   });
-  const capsInitRef = useRef(false);
-
   useEffect(() => {
-    if (coreConfig?.pluginBudgetCaps && !capsInitRef.current) {
-      capsInitRef.current = true;
-      const bc = coreConfig.pluginBudgetCaps;
+    const bc = coreConfig?.pluginBudgetCaps;
+    if (bc) {
       setCaps({
         referralCap: bc.referralCap > 0 ? String(bc.referralCap) : '',
         multiLevelCap: bc.multiLevelCap > 0 ? String(bc.multiLevelCap) : '',
@@ -603,15 +605,17 @@ function PluginSection() {
 
   const handleToggle = useCallback(
     (_plugin: CommissionPlugin, bit: number) => {
+      if (isLocked) return;
       const newModes = enabledModes ^ bit;
       setCommissionModes.mutate([entityId, newModes]);
     },
-    [entityId, enabledModes, setCommissionModes],
+    [entityId, enabledModes, setCommissionModes, isLocked],
   );
 
   const handleSaveCaps = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setPluginBudgetCaps.mutate([
         entityId,
         {
@@ -623,7 +627,7 @@ function PluginSection() {
         },
       ]);
     },
-    [entityId, caps, setPluginBudgetCaps],
+    [entityId, caps, setPluginBudgetCaps, isLocked],
   );
 
   return (
@@ -658,7 +662,7 @@ function PluginSection() {
                         <Switch
                           checked={isEnabled}
                           onCheckedChange={() => handleToggle(key, bit)}
-                          disabled={isTxBusy(setCommissionModes)}
+                          disabled={isLocked}
                         />
                       </div>
                     </div>
@@ -700,7 +704,7 @@ function PluginSection() {
           </div>
 
           <div className="mt-4 flex items-center gap-3">
-            <Button type="submit" disabled={isTxBusy(setPluginBudgetCaps)}>
+            <Button type="submit" disabled={isLocked}>
               {t('saveBudgetCaps')}
             </Button>
             <TxStatusIndicator txState={setPluginBudgetCaps.txState} />
@@ -719,7 +723,7 @@ function PluginSection() {
 function CommissionPreviewSection() {
   const t = useTranslations('commission');
   const te = useTranslations('enums');
-  const { coreConfig, config } = useCommission();
+  const { coreConfig } = useCommission();
   const referral = useReferralCommission();
   const multiLevel = useMultiLevelCommission();
   const levelDiff = useLevelDiffCommission();
@@ -728,7 +732,7 @@ function CommissionPreviewSection() {
   const poolReward = usePoolRewardCommission();
 
   const [orderAmount, setOrderAmount] = useState('10000');
-  const enabledModes = coreConfig?.enabledModes ?? config?.enabledModes ?? 0;
+  const enabledModes = coreConfig?.enabledModes ?? 0;
   const maxRate = coreConfig?.maxCommissionRate ?? 0;
   const creatorRate = coreConfig?.creatorRewardRate ?? 0;
   const budgetCaps = coreConfig?.pluginBudgetCaps;
@@ -782,8 +786,8 @@ function CommissionPreviewSection() {
             rates.push({ label: `L${i}`, value: bpsDisplay(tier.rate) });
             theoreticalMax += amount * tier.rate / 10000;
           });
-          if (mc.maxTotalRate > 0) {
-            rates.push({ label: 'maxTotalRate', value: bpsDisplay(mc.maxTotalRate) });
+          if (mc.maxLevelsDeep > 0) {
+            rates.push({ label: 'maxLevelsDeep', value: bpsDisplay(mc.maxLevelsDeep) });
           }
         }
         break;
@@ -816,10 +820,10 @@ function CommissionPreviewSection() {
       case CommissionPlugin.Team: {
         const tc2 = team.config;
         if (tc2) {
-          tc2.tiers.forEach((tier) => {
+          tc2.tiers.forEach((tier, i) => {
             rates.push({
-              label: `Tier ${tier.tier}`,
-              value: `${bpsDisplay(tier.rate)} (${t('minDirectCount')}: ${tier.minDirectCount})`,
+              label: `Tier ${i}`,
+              value: `${bpsDisplay(tier.rate)} (${t('minTeamSize')}: ${tier.minTeamSize})`,
             });
           });
           // Highest tier rate is theoretical max
@@ -1071,6 +1075,10 @@ function WithdrawalConfigSection() {
   } = useCommission();
   const { customLevels } = useMembers();
 
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(configureWithdrawal) || isTxBusy(setTokenWithdrawalConfig) || isTxBusy(pauseWithdrawal) || isTxBusy(clearWithdrawalConfig) || isTxBusy(clearTokenWithdrawalConfig) || isTxBusy(setMinWithdrawalInterval);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   // NEX form state
   const [nexMode, setNexMode] = useState<WithdrawalModeType>(WithdrawalModeType.FullWithdrawal);
   const [nexFixedRepurchaseRate, setNexFixedRepurchaseRate] = useState('');
@@ -1181,6 +1189,7 @@ function WithdrawalConfigSection() {
   const handleConfigureNex = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       configureWithdrawal.mutate([
         entityId,
         buildWithdrawalMode(nexMode, nexFixedRepurchaseRate, nexMinRepurchaseRate),
@@ -1190,12 +1199,13 @@ function WithdrawalConfigSection() {
         nexEnabled,
       ]);
     },
-    [entityId, nexMode, nexFixedRepurchaseRate, nexMinRepurchaseRate, nexWithdrawalRate, nexRepurchaseRate, nexOverrides, nexVoluntaryBonus, nexEnabled, configureWithdrawal],
+    [entityId, nexMode, nexFixedRepurchaseRate, nexMinRepurchaseRate, nexWithdrawalRate, nexRepurchaseRate, nexOverrides, nexVoluntaryBonus, nexEnabled, configureWithdrawal, isLocked],
   );
 
   const handleConfigureToken = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setTokenWithdrawalConfig.mutate([
         entityId,
         buildWithdrawalMode(tokenMode, tokenFixedRepurchaseRate, tokenMinRepurchaseRate),
@@ -1205,16 +1215,16 @@ function WithdrawalConfigSection() {
         tokenEnabled,
       ]);
     },
-    [entityId, tokenMode, tokenFixedRepurchaseRate, tokenMinRepurchaseRate, tokenWithdrawalRate, tokenRepurchaseRate, tokenOverrides, tokenVoluntaryBonus, tokenEnabled, setTokenWithdrawalConfig],
+    [entityId, tokenMode, tokenFixedRepurchaseRate, tokenMinRepurchaseRate, tokenWithdrawalRate, tokenRepurchaseRate, tokenOverrides, tokenVoluntaryBonus, tokenEnabled, setTokenWithdrawalConfig, isLocked],
   );
 
   const handleSetInterval = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!intervalValue.trim()) return;
+      if (isLocked || !intervalValue.trim()) return;
       setMinWithdrawalInterval.mutate([entityId, Number(intervalValue)]);
     },
-    [entityId, intervalValue, setMinWithdrawalInterval],
+    [entityId, intervalValue, setMinWithdrawalInterval, isLocked],
   );
 
   const renderCurrentConfig = (label: string, cfg: ReturnType<typeof useCommission>['withdrawalConfig']) => {
@@ -1521,15 +1531,15 @@ function WithdrawalConfigSection() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <Button type="submit" disabled={isTxBusy(mutation)}>
+        <Button type="submit" disabled={isLocked}>
           {t('updateWithdrawalConfig')}
         </Button>
         <Button
           type="button"
           variant="destructive"
           size="sm"
-          onClick={() => clearMutation.mutate([entityId])}
-          disabled={isTxBusy(clearMutation)}
+          onClick={() => { if (!isLocked) clearMutation.mutate([entityId]); }}
+          disabled={isLocked}
         >
           {prefix === 'nex' ? t('clearWithdrawalConfig') : t('clearTokenWithdrawalConfig')}
         </Button>
@@ -1556,8 +1566,8 @@ function WithdrawalConfigSection() {
           <Button
             variant={isWithdrawalPaused ? 'default' : 'destructive'}
             size="sm"
-            onClick={() => pauseWithdrawal.mutate([entityId])}
-            disabled={isTxBusy(pauseWithdrawal)}
+            onClick={() => { if (!isLocked) pauseWithdrawal.mutate([entityId]); }}
+            disabled={isLocked}
           >
             {isWithdrawalPaused ? t('resumeWithdrawal') : t('pauseWithdrawal')}
           </Button>
@@ -1576,7 +1586,7 @@ function WithdrawalConfigSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" disabled={isTxBusy(setMinWithdrawalInterval)}>
+          <Button type="submit" disabled={isLocked}>
             {t('setMinWithdrawalInterval')}
           </Button>
           <TxStatusIndicator txState={setMinWithdrawalInterval.txState} />
@@ -1646,6 +1656,10 @@ function WithdrawSection() {
     useMemberTokenLastWithdrawn,
   } = useCommission();
 
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(withdrawNex) || isTxBusy(withdrawToken);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const lastCredited = useMemberLastCredited(address);
   const lastWithdrawn = useMemberLastWithdrawn(address);
   const tokenLastCredited = useMemberTokenLastCredited(address);
@@ -1664,7 +1678,7 @@ function WithdrawSection() {
   const handleWithdrawNex = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!nexAmount.trim()) return;
+      if (isLocked || !nexAmount.trim()) return;
       withdrawNex.mutate([
         nexAmount.trim(),
         nexRepurchaseRate.trim() ? Number(nexRepurchaseRate) : null,
@@ -1674,13 +1688,13 @@ function WithdrawSection() {
       setNexRepurchaseRate('');
       setNexRepurchaseTarget('');
     },
-    [nexAmount, nexRepurchaseRate, nexRepurchaseTarget, withdrawNex],
+    [nexAmount, nexRepurchaseRate, nexRepurchaseTarget, withdrawNex, isLocked],
   );
 
   const handleWithdrawToken = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!tokenAmount.trim()) return;
+      if (isLocked || !tokenAmount.trim()) return;
       withdrawToken.mutate([
         tokenAmount.trim(),
         tokenRepurchaseRate.trim() ? Number(tokenRepurchaseRate) : null,
@@ -1690,7 +1704,7 @@ function WithdrawSection() {
       setTokenRepurchaseRate('');
       setTokenRepurchaseTarget('');
     },
-    [tokenAmount, tokenRepurchaseRate, tokenRepurchaseTarget, withdrawToken],
+    [tokenAmount, tokenRepurchaseRate, tokenRepurchaseTarget, withdrawToken, isLocked],
   );
 
   return (
@@ -1759,7 +1773,7 @@ function WithdrawSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button type="submit" disabled={paused || isTxBusy(withdrawNex)}>
+                  <Button type="submit" disabled={paused || isLocked}>
                     {t('withdrawNex')}
                   </Button>
                   <TxStatusIndicator txState={withdrawNex.txState} />
@@ -1815,7 +1829,7 @@ function WithdrawSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button type="submit" disabled={paused || isTxBusy(withdrawToken)}>
+                  <Button type="submit" disabled={paused || isLocked}>
                     {t('withdrawToken')}
                   </Button>
                   <TxStatusIndicator txState={withdrawToken.txState} />
@@ -1836,27 +1850,31 @@ function EntityFundsSection() {
   const { entityId } = useEntityContext();
   const { withdrawEntityFunds, withdrawEntityTokenFunds } = useCommission();
 
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(withdrawEntityFunds) || isTxBusy(withdrawEntityTokenFunds);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const [nexFundAmount, setNexFundAmount] = useState('');
   const [tokenFundAmount, setTokenFundAmount] = useState('');
 
   const handleWithdrawNexFunds = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!nexFundAmount.trim()) return;
+      if (isLocked || !nexFundAmount.trim()) return;
       withdrawEntityFunds.mutate([entityId, nexFundAmount.trim()]);
       setNexFundAmount('');
     },
-    [entityId, nexFundAmount, withdrawEntityFunds],
+    [entityId, nexFundAmount, withdrawEntityFunds, isLocked],
   );
 
   const handleWithdrawTokenFunds = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!tokenFundAmount.trim()) return;
+      if (isLocked || !tokenFundAmount.trim()) return;
       withdrawEntityTokenFunds.mutate([entityId, tokenFundAmount.trim()]);
       setTokenFundAmount('');
     },
-    [entityId, tokenFundAmount, withdrawEntityTokenFunds],
+    [entityId, tokenFundAmount, withdrawEntityTokenFunds, isLocked],
   );
 
   return (
@@ -1879,7 +1897,7 @@ function EntityFundsSection() {
               className="w-48"
             />
           </div>
-          <Button type="submit" disabled={isTxBusy(withdrawEntityFunds)}>
+          <Button type="submit" disabled={isLocked}>
             {t('withdrawEntityFunds')}
           </Button>
           <TxStatusIndicator txState={withdrawEntityFunds.txState} />
@@ -1900,7 +1918,7 @@ function EntityFundsSection() {
               className="w-48"
             />
           </div>
-          <Button type="submit" disabled={isTxBusy(withdrawEntityTokenFunds)}>
+          <Button type="submit" disabled={isLocked}>
             {t('withdrawEntityTokenFunds')}
           </Button>
           <TxStatusIndicator txState={withdrawEntityTokenFunds.txState} />
@@ -1932,6 +1950,10 @@ function GovernanceSection() {
     forceGlobalPause,
     retryCancelCommission,
   } = useCommission();
+
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(setGlobalMinRepurchaseRate) || isTxBusy(setGlobalMinTokenRepurchaseRate) || isTxBusy(setGlobalMaxCommissionRate) || isTxBusy(setGlobalMaxTokenCommissionRate) || isTxBusy(setTokenPlatformFeeRate) || isTxBusy(forceDisableEntityCommission) || isTxBusy(forceEnableEntityCommission) || isTxBusy(forceGlobalPause) || isTxBusy(retryCancelCommission);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const [minRepRate, setMinRepRate] = useState('');
   const [minTokenRepRate, setMinTokenRepRate] = useState('');
@@ -1987,7 +2009,7 @@ function GovernanceSection() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!minRepRate.trim()) return;
+            if (isLocked || !minRepRate.trim()) return;
             setGlobalMinRepurchaseRate.mutate([Number(minRepRate)]);
             setMinRepRate('');
           }}
@@ -2003,7 +2025,7 @@ function GovernanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" size="sm" disabled={isTxBusy(setGlobalMinRepurchaseRate)}>
+          <Button type="submit" size="sm" disabled={isLocked}>
             {t('setRate')}
           </Button>
           <TxStatusIndicator txState={setGlobalMinRepurchaseRate.txState} />
@@ -2013,7 +2035,7 @@ function GovernanceSection() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!minTokenRepRate.trim()) return;
+            if (isLocked || !minTokenRepRate.trim()) return;
             setGlobalMinTokenRepurchaseRate.mutate([Number(minTokenRepRate)]);
             setMinTokenRepRate('');
           }}
@@ -2029,7 +2051,7 @@ function GovernanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" size="sm" disabled={isTxBusy(setGlobalMinTokenRepurchaseRate)}>
+          <Button type="submit" size="sm" disabled={isLocked}>
             {t('setRate')}
           </Button>
           <TxStatusIndicator txState={setGlobalMinTokenRepurchaseRate.txState} />
@@ -2039,7 +2061,7 @@ function GovernanceSection() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!maxCommRate.trim()) return;
+            if (isLocked || !maxCommRate.trim()) return;
             setGlobalMaxCommissionRate.mutate([Number(maxCommRate)]);
             setMaxCommRate('');
           }}
@@ -2055,7 +2077,7 @@ function GovernanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" size="sm" disabled={isTxBusy(setGlobalMaxCommissionRate)}>
+          <Button type="submit" size="sm" disabled={isLocked}>
             {t('setRate')}
           </Button>
           <TxStatusIndicator txState={setGlobalMaxCommissionRate.txState} />
@@ -2065,7 +2087,7 @@ function GovernanceSection() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!maxTokenCommRate.trim()) return;
+            if (isLocked || !maxTokenCommRate.trim()) return;
             setGlobalMaxTokenCommissionRate.mutate([Number(maxTokenCommRate)]);
             setMaxTokenCommRate('');
           }}
@@ -2081,7 +2103,7 @@ function GovernanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" size="sm" disabled={isTxBusy(setGlobalMaxTokenCommissionRate)}>
+          <Button type="submit" size="sm" disabled={isLocked}>
             {t('setRate')}
           </Button>
           <TxStatusIndicator txState={setGlobalMaxTokenCommissionRate.txState} />
@@ -2091,7 +2113,7 @@ function GovernanceSection() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!platFeeRate.trim()) return;
+            if (isLocked || !platFeeRate.trim()) return;
             setTokenPlatformFeeRate.mutate([Number(platFeeRate)]);
             setPlatFeeRate('');
           }}
@@ -2107,7 +2129,7 @@ function GovernanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" size="sm" disabled={isTxBusy(setTokenPlatformFeeRate)}>
+          <Button type="submit" size="sm" disabled={isLocked}>
             {t('setRate')}
           </Button>
           <TxStatusIndicator txState={setTokenPlatformFeeRate.txState} />
@@ -2132,20 +2154,22 @@ function GovernanceSection() {
               variant="destructive"
               size="sm"
               onClick={() => {
+                if (isLocked) return;
                 const eid = Number(forceEntityId) || entityId;
                 forceDisableEntityCommission.mutate([eid]);
               }}
-              disabled={isTxBusy(forceDisableEntityCommission)}
+              disabled={isLocked}
             >
               {t('forceDisableEntity')}
             </Button>
             <Button
               size="sm"
               onClick={() => {
+                if (isLocked) return;
                 const eid = Number(forceEntityId) || entityId;
                 forceEnableEntityCommission.mutate([eid]);
               }}
-              disabled={isTxBusy(forceEnableEntityCommission)}
+              disabled={isLocked}
             >
               {t('forceEnableEntity')}
             </Button>
@@ -2163,8 +2187,8 @@ function GovernanceSection() {
           <Button
             variant={globalCommissionPaused ? 'default' : 'destructive'}
             size="sm"
-            onClick={() => forceGlobalPause.mutate([!globalCommissionPaused])}
-            disabled={isTxBusy(forceGlobalPause)}
+            onClick={() => { if (!isLocked) forceGlobalPause.mutate([!globalCommissionPaused]); }}
+            disabled={isLocked}
           >
             {t('forceGlobalPause')}: {globalCommissionPaused ? 'Resume' : 'Pause'}
           </Button>
@@ -2188,10 +2212,11 @@ function GovernanceSection() {
           <Button
             size="sm"
             onClick={() => {
+              if (isLocked) return;
               const eid = Number(retryEntityId) || entityId;
               retryCancelCommission.mutate([eid]);
             }}
-            disabled={isTxBusy(retryCancelCommission)}
+            disabled={isLocked}
           >
             {t('retryCancelCommission')}
           </Button>
@@ -2209,16 +2234,20 @@ function MaintenanceSection() {
   const { entityId } = useEntityContext();
   const { archiveOrderRecords } = useCommission();
 
+  const { isLocked, setLocked } = useTxLock();
+  const localBusy = isTxBusy(archiveOrderRecords);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const [archiveOrderId, setArchiveOrderId] = useState('');
 
   const handleArchive = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!archiveOrderId.trim()) return;
+      if (isLocked || !archiveOrderId.trim()) return;
       archiveOrderRecords.mutate([entityId, Number(archiveOrderId)]);
       setArchiveOrderId('');
     },
-    [entityId, archiveOrderId, archiveOrderRecords],
+    [entityId, archiveOrderId, archiveOrderRecords, isLocked],
   );
 
   return (
@@ -2240,7 +2269,7 @@ function MaintenanceSection() {
               className="w-40"
             />
           </div>
-          <Button type="submit" disabled={isTxBusy(archiveOrderRecords)}>
+          <Button type="submit" disabled={isLocked}>
             {t('archiveOrderRecords')}
           </Button>
           <TxStatusIndicator txState={archiveOrderRecords.txState} />

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
@@ -13,6 +13,7 @@ import { useWallet } from '@/hooks/use-wallet';
 import { useNexBalance } from '@/hooks/use-external-queries';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
 import { useEntityToken } from '@/hooks/use-entity-token';
+import { useTxLock } from '@/hooks/use-tx-lock';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { CopyableAddress } from '@/components/copyable-address';
 import { isTauri } from '@/lib/utils/platform';
@@ -245,6 +246,10 @@ function SidebarWalletPanel({ collapsed }: { collapsed: boolean }) {
     activeTx.txState.status === 'signing' ||
     activeTx.txState.status === 'broadcasting' ||
     activeTx.txState.status === 'inBlock';
+
+  // Drive global transaction lock
+  const { setLocked } = useTxLock();
+  useEffect(() => { setLocked(isTxBusy); }, [isTxBusy, setLocked]);
 
   // Copy address
   const [copied, setCopied] = useState(false);

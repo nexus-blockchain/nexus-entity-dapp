@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useKyc } from '@/hooks/use-kyc';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -32,10 +33,6 @@ import {
 import { CopyableAddress } from '@/components/copyable-address';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 function encodeCountryCode(value: string): [number, number] | null {
   const normalized = value.trim().toUpperCase();

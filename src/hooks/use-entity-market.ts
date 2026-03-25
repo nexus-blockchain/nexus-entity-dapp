@@ -175,6 +175,8 @@ export function useEntityMarket() {
   const marketSell = useEntityMutation('entityMarket', 'marketSell', { invalidateKeys });
   const cancelOrder = useEntityMutation('entityMarket', 'cancelOrder', { invalidateKeys });
   const takeOrder = useEntityMutation('entityMarket', 'takeOrder', { invalidateKeys });
+  const modifyOrder = useEntityMutation('entityMarket', 'modifyOrder', { invalidateKeys });
+  const cancelAllOrders = useEntityMutation('entityMarket', 'cancelAllOrders', { invalidateKeys });
 
   return {
     orders: orderBookQuery.data ?? [],
@@ -188,5 +190,7 @@ export function useEntityMarket() {
     marketSell,
     cancelOrder,
     takeOrder,
+    modifyOrder,
+    cancelAllOrders,
   };
 }

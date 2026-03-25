@@ -7,6 +7,7 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { useEntityMarket } from '@/hooks/use-entity-market';
 import { useNexMarket } from '@/hooks/use-nex-market';
 import { useChainConstants } from '@/hooks/use-chain-constants';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { useWalletStore } from '@/stores/wallet-store';
 import type { MarketOrder } from '@/lib/types/models';
 
@@ -47,9 +48,6 @@ function formatAmount(amount: bigint): string {
   return amount.toLocaleString();
 }
 
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 /** Convert a human-readable USDT price (e.g. "0.5") to chain u64 (precision 10^6, e.g. 500000) */
 function usdtPriceToU64(input: string): string {

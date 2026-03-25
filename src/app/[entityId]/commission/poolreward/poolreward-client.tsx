@@ -11,6 +11,7 @@ import { usePoolRewardCommission } from '@/hooks/use-pool-reward-commission';
 import { useMembers } from '@/hooks/use-members';
 import { useCurrentBlock } from '@/hooks/use-current-block';
 import { useWalletStore } from '@/stores/wallet-store';
+import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,10 +26,6 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 /** Format chain balance (12 decimals) to human-readable string */
 function formatNex(planck: bigint): string {
@@ -91,11 +88,16 @@ function ConfigSection() {
     resumePoolReward,
   } = usePoolRewardCommission();
   const { customLevels } = useMembers();
+  const { isLocked, setLocked } = useTxLock();
 
   // ── Local editing state ──────────────────────────────────
   const [localRatios, setLocalRatios] = useState<LevelRatioRow[]>([]);
   const [roundDuration, setRoundDuration] = useState('');
   const [formError, setFormError] = useState('');
+
+  // Track local mutations to drive the tx lock
+  const localBusy = isTxBusy(setPoolRewardConfig) || isTxBusy(clearPoolRewardConfig) || isTxBusy(pausePoolReward) || isTxBusy(resumePoolReward);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   // ── Sync chain config → local state (only when not dirty) ──
   const isDirty = useMemo(() => {
@@ -182,6 +184,7 @@ function ConfigSection() {
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setFormError('');
       const ratios: [number, number][] = localRatios
         .filter((r) => r.levelId && r.ratio)
@@ -207,14 +210,15 @@ function ConfigSection() {
 
   // ── Pause/Resume toggle ──────────────────────────────────
   const handleToggle = useCallback(() => {
+    if (isLocked) return;
     if (config && !isPaused) {
       pausePoolReward.mutate([entityId]);
     } else if (config && isPaused) {
       resumePoolReward.mutate([entityId]);
     }
-  }, [entityId, config, isPaused, pausePoolReward, resumePoolReward]);
+  }, [entityId, config, isPaused, pausePoolReward, resumePoolReward, isLocked]);
 
-  const isToggleBusy = isTxBusy(pausePoolReward) || isTxBusy(resumePoolReward) || isTxBusy(setPoolRewardConfig);
+  const isToggleBusy = isLocked;
   const toggleTxState = config && !isPaused
     ? pausePoolReward.txState
     : config
@@ -409,14 +413,14 @@ function ConfigSection() {
             )}
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(setPoolRewardConfig)}>
+              <Button type="submit" disabled={isLocked}>
                 {t('saveConfig')}
               </Button>
               <Button
                 type="button"
                 variant="destructive"
-                onClick={() => clearPoolRewardConfig.mutate([entityId])}
-                disabled={isTxBusy(clearPoolRewardConfig)}
+                onClick={() => { if (!isLocked) clearPoolRewardConfig.mutate([entityId]); }}
+                disabled={isLocked}
               >
                 {t('clearConfig')}
               </Button>
@@ -599,6 +603,10 @@ function MyParticipationSection() {
     useClaimHistory,
     claimPoolReward,
   } = usePoolRewardCommission();
+  const { isLocked, setLocked } = useTxLock();
+
+  const localBusy = isTxBusy(claimPoolReward);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const { data: lastClaimed } = useLastClaimedRound(address);
   const { data: claimHistory } = useClaimHistory(address);
@@ -619,8 +627,9 @@ function MyParticipationSection() {
   const alreadyClaimed = !!currentRound && currentRound.roundId <= lastClaimedRound;
 
   const handleClaim = useCallback(() => {
+    if (isLocked) return;
     claimPoolReward.mutate([entityId]);
-  }, [entityId, claimPoolReward]);
+  }, [entityId, claimPoolReward, isLocked]);
 
   if (!address) {
     return (
@@ -666,7 +675,7 @@ function MyParticipationSection() {
         <div className="flex items-center gap-3">
           <Button
             onClick={handleClaim}
-            disabled={!canClaim || isTxBusy(claimPoolReward)}
+            disabled={!canClaim || isLocked}
             size="lg"
           >
             {isTxBusy(claimPoolReward) ? t('claimingReward') : t('claimReward')}
@@ -805,18 +814,18 @@ export function PoolRewardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
-        <Link href={`/${entityId}/commission`}>
-          <Button variant="outline" size="sm">{t('backToCommission')}</Button>
-        </Link>
-      </div>
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">{t('title')}</h1>
+          <Link href={`/${entityId}/commission`}>
+            <Button variant="outline" size="sm">{t('backToCommission')}</Button>
+          </Link>
+        </div>
 
-      <MyParticipationSection />
-      <RoundInfoSection />
-      <StatsSection />
-      <ConfigSection />
-    </div>
+        <MyParticipationSection />
+        <RoundInfoSection />
+        <StatsSection />
+        <ConfigSection />
+      </div>
   );
 }

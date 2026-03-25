@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useReview, validateRating } from '@/hooks/use-review';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -19,10 +20,6 @@ import { CopyableAddress } from '@/components/copyable-address';
 import { LabelWithTip } from '@/components/field-help-tip';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 function StarDisplay({ rating }: { rating: number }) {
   return (

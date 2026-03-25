@@ -8,7 +8,7 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { useSingleLineCommission } from '@/hooks/use-single-line-commission';
 import { useMembers } from '@/hooks/use-members';
-
+import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 import { useTranslations } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,12 +22,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { AlertCircle, ArrowUp } from 'lucide-react';
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -60,6 +54,7 @@ function ConfigSection() {
   const t = useTranslations('singleLine');
   const { entityId } = useEntityContext();
   const { config, configureSingleLine, clearConfig, pauseSingleLine, resumeSingleLine } = useSingleLineCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [uplineRate, setUplineRate] = useState('');
   const [downlineRate, setDownlineRate] = useState('');
@@ -80,6 +75,10 @@ function ConfigSection() {
     }
   }, [config, modeInitialized]);
 
+  // Track local mutations to drive the tx lock
+  const localBusy = isTxBusy(configureSingleLine) || isTxBusy(clearConfig) || isTxBusy(pauseSingleLine) || isTxBusy(resumeSingleLine);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
+
   const buildParams = () => [
     entityId,
     Number(uplineRate) || config?.uplineRate || 100,
@@ -96,12 +95,14 @@ function ConfigSection() {
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       configureSingleLine.mutate(buildParams());
     },
-    [entityId, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, config, configureSingleLine],
+    [entityId, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, config, configureSingleLine, isLocked],
   );
 
   const handleToggle = useCallback(() => {
+    if (isLocked) return;
     if (config?.enabled) {
       pauseSingleLine.mutate([entityId]);
     } else if (config && !config.enabled) {
@@ -109,9 +110,9 @@ function ConfigSection() {
     } else {
       configureSingleLine.mutate(buildParams());
     }
-  }, [entityId, config, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, pauseSingleLine, resumeSingleLine, configureSingleLine]);
+  }, [entityId, config, uplineRate, downlineRate, baseUplineLevels, baseDownlineLevels, levelIncrementThreshold, maxUplineLevels, maxDownlineLevels, levelMode, pauseSingleLine, resumeSingleLine, configureSingleLine, isLocked]);
 
-  const isToggleBusy = isTxBusy(pauseSingleLine) || isTxBusy(resumeSingleLine) || isTxBusy(configureSingleLine);
+  const isToggleBusy = isLocked;
   const toggleTxState = config?.enabled
     ? pauseSingleLine.txState
     : config
@@ -231,14 +232,14 @@ function ConfigSection() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(configureSingleLine)}>
+              <Button type="submit" disabled={isLocked}>
                 {t('saveConfig')}
               </Button>
               <Button
                 type="button"
                 variant="destructive"
-                onClick={() => clearConfig.mutate([entityId])}
-                disabled={isTxBusy(clearConfig)}
+                onClick={() => { if (!isLocked) clearConfig.mutate([entityId]); }}
+                disabled={isLocked}
               >
                 {t('clearConfig')}
               </Button>
@@ -259,6 +260,7 @@ function LevelOverridesSection() {
   const { entityId } = useEntityContext();
   const { config, useLevelOverrides, setLevelBasedLevels, removeLevelBasedLevels } = useSingleLineCommission();
   const { customLevels } = useMembers();
+  const { isLocked, setLocked } = useTxLock();
 
   const maxLevelId = config?.maxUplineLevels ? 10 : 10; // query up to 10 levels
   const { data: overrides } = useLevelOverrides(maxLevelId);
@@ -267,6 +269,10 @@ function LevelOverridesSection() {
   const [newUplineLevels, setNewUplineLevels] = useState('');
   const [newDownlineLevels, setNewDownlineLevels] = useState('');
   const [validationError, setValidationError] = useState('');
+
+  // Track local mutations to drive the tx lock
+  const localBusy = isTxBusy(setLevelBasedLevels) || isTxBusy(removeLevelBasedLevels);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   // Detect LevelOverrideExceedsMax from chain tx error
   const isChainExceedsMaxError = setLevelBasedLevels.txState.status === 'error'
@@ -290,6 +296,7 @@ function LevelOverridesSection() {
   const handleSetOverride = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       setValidationError('');
       const levelId = Number(newLevelId);
       const upLevels = Number(newUplineLevels);
@@ -310,14 +317,15 @@ function LevelOverridesSection() {
       setNewUplineLevels('');
       setNewDownlineLevels('');
     },
-    [entityId, newLevelId, newUplineLevels, newDownlineLevels, config, setLevelBasedLevels, t],
+    [entityId, newLevelId, newUplineLevels, newDownlineLevels, config, setLevelBasedLevels, t, isLocked],
   );
 
   const handleRemove = useCallback(
     (levelId: number) => {
+      if (isLocked) return;
       removeLevelBasedLevels.mutate([entityId, levelId]);
     },
-    [entityId, removeLevelBasedLevels],
+    [entityId, removeLevelBasedLevels, isLocked],
   );
 
   return (
@@ -396,7 +404,7 @@ function LevelOverridesSection() {
                     variant="destructive"
                     size="sm"
                     onClick={() => handleRemove(o.levelId)}
-                    disabled={isTxBusy(removeLevelBasedLevels)}
+                    disabled={isLocked}
                   >
                     {t('removeOverride')}
                   </Button>
@@ -464,7 +472,7 @@ function LevelOverridesSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button type="submit" disabled={isTxBusy(setLevelBasedLevels) || !newLevelId || availableLevels.length === 0}>
+                  <Button type="submit" disabled={isLocked || !newLevelId || availableLevels.length === 0}>
                     {t('setOverride')}
                   </Button>
                   <TxStatusIndicator txState={setLevelBasedLevels.txState} />
@@ -518,17 +526,17 @@ export function SingleLinePage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
-        <Link href={`/${entityId}/commission`}>
-          <Button variant="outline" size="sm">{t('backToCommission')}</Button>
-        </Link>
-      </div>
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">{t('title')}</h1>
+          <Link href={`/${entityId}/commission`}>
+            <Button variant="outline" size="sm">{t('backToCommission')}</Button>
+          </Link>
+        </div>
 
-      <ConfigSection />
-      {levelMode === 'memberLevel' && <LevelOverridesSection />}
-      <RuntimeNoticeSection />
-    </div>
+        <ConfigSection />
+        {levelMode === 'memberLevel' && <LevelOverridesSection />}
+        <RuntimeNoticeSection />
+      </div>
   );
 }

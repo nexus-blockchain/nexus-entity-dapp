@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
@@ -8,6 +8,7 @@ import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { SalesThresholdMode } from '@/lib/types/enums';
 import { useTeamCommission } from '@/hooks/use-team-commission';
+import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 
 import { useTranslations } from 'next-intl';
 import { formatNex } from '@/lib/utils/format';
@@ -22,12 +23,6 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
-}
 
 // ─── Loading Skeleton ───────────────────────────────────────
 
@@ -60,32 +55,36 @@ function ConfigSection() {
   const t = useTranslations('team');
   const { entityId } = useEntityContext();
   const { config, setTeamPerformanceConfig, clearTeamPerformanceConfig, pauseTeamPerformance, resumeTeamPerformance } = useTeamCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [maxDepth, setMaxDepth] = useState('');
   const [allowStacking, setAllowStacking] = useState(false);
-  const [thresholdMode, setThresholdMode] = useState<SalesThresholdMode>(SalesThresholdMode.PersonalOnly);
+  const [thresholdMode, setThresholdMode] = useState<SalesThresholdMode>(SalesThresholdMode.Nex);
+
+  const localBusy = isTxBusy(setTeamPerformanceConfig) || isTxBusy(clearTeamPerformanceConfig) || isTxBusy(pauseTeamPerformance) || isTxBusy(resumeTeamPerformance);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const handleSaveConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      // setTeamPerformanceConfig(entityId, tiers:Vec<TeamPerformanceTier>, maxDepth:u8, allowStacking:bool, thresholdMode:SalesThresholdMode)
+      if (isLocked) return;
       setTeamPerformanceConfig.mutate([
         entityId,
         config?.tiers?.map((t) => ({
-          tier: t.tier,
+          sales_threshold: t.salesThreshold.toString(),
+          min_team_size: t.minTeamSize,
           rate: t.rate,
-          minTeamPerformance: t.minTeamPerformance.toString(),
-          minDirectCount: t.minDirectCount,
         })) ?? [],
         Number(maxDepth) || config?.maxDepth || 3,
         allowStacking,
         thresholdMode,
       ]);
     },
-    [entityId, maxDepth, allowStacking, thresholdMode, config, setTeamPerformanceConfig],
+    [entityId, maxDepth, allowStacking, thresholdMode, config, setTeamPerformanceConfig, isLocked],
   );
 
   const handleToggle = useCallback(() => {
+    if (isLocked) return;
     if (config?.enabled) {
       pauseTeamPerformance.mutate([entityId]);
     } else if (config) {
@@ -99,9 +98,8 @@ function ConfigSection() {
         thresholdMode,
       ]);
     }
-  }, [entityId, config, maxDepth, allowStacking, thresholdMode, pauseTeamPerformance, resumeTeamPerformance, setTeamPerformanceConfig]);
+  }, [entityId, config, maxDepth, allowStacking, thresholdMode, pauseTeamPerformance, resumeTeamPerformance, setTeamPerformanceConfig, isLocked]);
 
-  const isToggleBusy = isTxBusy(pauseTeamPerformance) || isTxBusy(resumeTeamPerformance) || isTxBusy(setTeamPerformanceConfig);
   const toggleTxState = config?.enabled
     ? pauseTeamPerformance.txState
     : config
@@ -149,7 +147,7 @@ function ConfigSection() {
             <Switch
               checked={config?.enabled ?? false}
               onCheckedChange={handleToggle}
-              disabled={isToggleBusy}
+              disabled={isLocked}
             />
             <Label>{t('enableToggle')}</Label>
             <TxStatusIndicator txState={toggleTxState} />
@@ -177,9 +175,8 @@ function ConfigSection() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={SalesThresholdMode.PersonalOnly}>{t('personalOnly')}</SelectItem>
-                    <SelectItem value={SalesThresholdMode.TeamTotal}>{t('teamTotal')}</SelectItem>
-                    <SelectItem value={SalesThresholdMode.WeightedMix}>{t('weightedMix')}</SelectItem>
+                    <SelectItem value={SalesThresholdMode.Nex}>{t('thresholdNex')}</SelectItem>
+                    <SelectItem value={SalesThresholdMode.Usdt}>{t('thresholdUsdt')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -195,14 +192,14 @@ function ConfigSection() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(setTeamPerformanceConfig)}>
+              <Button type="submit" disabled={isLocked}>
                 {t('saveConfig')}
               </Button>
               <Button
                 type="button"
                 variant="destructive"
-                onClick={() => clearTeamPerformanceConfig.mutate([entityId])}
-                disabled={isTxBusy(clearTeamPerformanceConfig)}
+                onClick={() => { if (!isLocked) clearTeamPerformanceConfig.mutate([entityId]); }}
+                disabled={isLocked}
               >
                 {t('clearConfig')}
               </Button>
@@ -222,32 +219,35 @@ function TiersSection() {
   const t = useTranslations('team');
   const { entityId } = useEntityContext();
   const { config, addTier, removeTier } = useTeamCommission();
+  const { isLocked, setLocked } = useTxLock();
 
   const [newRate, setNewRate] = useState('');
-  const [newMinPerf, setNewMinPerf] = useState('');
-  const [newMinDirect, setNewMinDirect] = useState('');
+  const [newSalesThreshold, setNewSalesThreshold] = useState('');
+  const [newMinTeamSize, setNewMinTeamSize] = useState('');
 
   const tiers = config?.tiers ?? [];
+
+  const localBusy = isTxBusy(addTier) || isTxBusy(removeTier);
+  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const handleAddTier = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (isLocked) return;
       if (!newRate.trim()) return;
-      // addTier(entityId, tier:TeamPerformanceTier) — struct
       addTier.mutate([
         entityId,
         {
-          tier: tiers.length,
+          sales_threshold: newSalesThreshold.trim() || '0',
+          min_team_size: Number(newMinTeamSize) || 0,
           rate: Number(newRate),
-          minTeamPerformance: newMinPerf.trim() || '0',
-          minDirectCount: Number(newMinDirect) || 0,
         },
       ]);
       setNewRate('');
-      setNewMinPerf('');
-      setNewMinDirect('');
+      setNewSalesThreshold('');
+      setNewMinTeamSize('');
     },
-    [entityId, newRate, newMinPerf, newMinDirect, tiers.length, addTier],
+    [entityId, newRate, newSalesThreshold, newMinTeamSize, tiers.length, addTier, isLocked],
   );
 
   return (
@@ -263,10 +263,10 @@ function TiersSection() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t('tier')}</TableHead>
+                <TableHead>#</TableHead>
                 <TableHead>{t('rate')}</TableHead>
-                <TableHead>{t('minPerformance')}</TableHead>
-                <TableHead>{t('minDirectCount')}</TableHead>
+                <TableHead>{t('salesThreshold')}</TableHead>
+                <TableHead>{t('minTeamSize')}</TableHead>
                 <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
                   <TableHead className="w-[100px]" />
                 </PermissionGuard>
@@ -275,18 +275,18 @@ function TiersSection() {
             <TableBody>
               {tiers.map((tier, index) => (
                 <TableRow key={index}>
-                  <TableCell className="font-medium">T{tier.tier}</TableCell>
+                  <TableCell className="font-medium">T{index}</TableCell>
                   <TableCell>{tier.rate} {t('bps')}</TableCell>
-                  <TableCell>{formatNex(tier.minTeamPerformance)} NEX</TableCell>
-                  <TableCell>{tier.minDirectCount}</TableCell>
+                  <TableCell>{formatNex(tier.salesThreshold)}</TableCell>
+                  <TableCell>{tier.minTeamSize}</TableCell>
                   <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
                     <TableCell>
                       <Button
                         size="sm"
                         variant="ghost"
                         className="text-destructive"
-                        onClick={() => removeTier.mutate([entityId, index])}
-                        disabled={isTxBusy(removeTier)}
+                        onClick={() => { if (!isLocked) removeTier.mutate([entityId, index]); }}
+                        disabled={isLocked}
                       >
                         {t('removeTier')}
                       </Button>
@@ -312,27 +312,27 @@ function TiersSection() {
               />
             </div>
             <div className="space-y-2">
-              <LabelWithTip htmlFor="tm-new-perf" tip={t('help.newTierMinPerformance')}>{t('newTierMinPerformance')}</LabelWithTip>
+              <LabelWithTip htmlFor="tm-new-perf" tip={t('help.salesThreshold')}>{t('salesThreshold')}</LabelWithTip>
               <Input
                 id="tm-new-perf"
                 type="text"
                 inputMode="decimal"
-                value={newMinPerf}
-                onChange={(e) => setNewMinPerf(e.target.value)}
+                value={newSalesThreshold}
+                onChange={(e) => setNewSalesThreshold(e.target.value)}
                 className="w-36"
               />
             </div>
             <div className="space-y-2">
-              <LabelWithTip htmlFor="tm-new-direct" tip={t('help.newTierMinDirect')}>{t('newTierMinDirect')}</LabelWithTip>
+              <LabelWithTip htmlFor="tm-new-team-size" tip={t('help.minTeamSize')}>{t('minTeamSize')}</LabelWithTip>
               <Input
-                id="tm-new-direct"
+                id="tm-new-team-size"
                 type="number"
-                value={newMinDirect}
-                onChange={(e) => setNewMinDirect(e.target.value)}
+                value={newMinTeamSize}
+                onChange={(e) => setNewMinTeamSize(e.target.value)}
                 className="w-24"
               />
             </div>
-            <Button type="submit" disabled={isTxBusy(addTier)}>
+            <Button type="submit" disabled={isLocked}>
               {t('addTier')}
             </Button>
           </form>
@@ -383,17 +383,17 @@ export function TeamPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t('title')}</h1>
-        <Link href={`/${entityId}/commission`}>
-          <Button variant="outline" size="sm">{t('backToCommission')}</Button>
-        </Link>
-      </div>
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">{t('title')}</h1>
+          <Link href={`/${entityId}/commission`}>
+            <Button variant="outline" size="sm">{t('backToCommission')}</Button>
+          </Link>
+        </div>
 
-      <ConfigSection />
-      <TiersSection />
-      <RuntimeNoticeSection />
-    </div>
+        <ConfigSection />
+        <TiersSection />
+        <RuntimeNoticeSection />
+      </div>
   );
 }

@@ -12,18 +12,16 @@ import type { TeamConfig, TeamTier, TeamStats, TeamInfo } from '@/lib/types/mode
 function parseTeamTier(raw: unknown): TeamTier {
   const obj = (raw as any)?.toJSON?.() ?? raw ?? {};
   return {
-    tier: Number(obj.tier ?? 0),
+    salesThreshold: BigInt(String(obj.salesThreshold ?? obj.sales_threshold ?? 0)),
+    minTeamSize: Number(obj.minTeamSize ?? obj.min_team_size ?? 0),
     rate: Number(obj.rate ?? 0),
-    minTeamPerformance: BigInt(String(obj.minTeamPerformance ?? obj.min_team_performance ?? 0)),
-    minDirectCount: Number(obj.minDirectCount ?? obj.min_direct_count ?? 0),
   };
 }
 
 function parseSalesThresholdMode(raw: unknown): SalesThresholdMode {
-  const s = String(raw ?? 'PersonalOnly');
-  if (s === 'TeamTotal' || s === 'teamTotal') return SalesThresholdMode.TeamTotal;
-  if (s === 'WeightedMix' || s === 'weightedMix') return SalesThresholdMode.WeightedMix;
-  return SalesThresholdMode.PersonalOnly;
+  const s = String(raw ?? 'Nex');
+  if (s === 'Usdt' || s === 'usdt') return SalesThresholdMode.Usdt;
+  return SalesThresholdMode.Nex;
 }
 
 function parseTeamConfig(raw: unknown): TeamConfig | null {

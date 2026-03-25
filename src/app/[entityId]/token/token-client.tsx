@@ -8,6 +8,7 @@ import { TxConfirmDialog } from '@/components/tx-confirm-dialog';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
 import { TokenType, TransferRestrictionMode } from '@/lib/types/enums';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 
 import { useTranslations } from 'next-intl';
 import { LabelWithTip } from '@/components/field-help-tip';
@@ -46,10 +47,6 @@ function parseTokenInput(value: string, decimals: number): string {
   const frac = (parts[1] || '').slice(0, decimals).padEnd(decimals, '0');
   const raw = BigInt(whole + frac).toString();
   return raw;
-}
-
-function isTxBusy(txState: { status: string }): boolean {
-  return txState.status === 'signing' || txState.status === 'broadcasting';
 }
 
 // ─── Create Token Form ──────────────────────────────────────
@@ -161,7 +158,7 @@ function CreateTokenForm() {
                 </div>
               </div>
               <div className="flex items-center gap-3 pt-2">
-                <Button type="submit" disabled={isTxBusy(createToken.txState)}>
+                <Button type="submit" disabled={isTxBusy(createToken)}>
                   {t('createTokenButton')}
                 </Button>
                 <TxStatusIndicator txState={createToken.txState} />
@@ -414,8 +411,8 @@ function TokenConfigSection() {
             </div>
 
             <div className="flex items-center gap-3 pt-2">
-              <Button type="submit" disabled={isTxBusy(updateTokenConfig.txState)}>
-                {isTxBusy(updateTokenConfig.txState) ? t('saving') : t('save')}
+              <Button type="submit" disabled={isTxBusy(updateTokenConfig)}>
+                {isTxBusy(updateTokenConfig) ? t('saving') : t('save')}
               </Button>
               <TxStatusIndicator txState={updateTokenConfig.txState} />
             </div>
@@ -480,7 +477,7 @@ function MaxSupplySection() {
                 placeholder="0"
               />
             </div>
-            <Button type="submit" disabled={isTxBusy(setMaxSupply.txState)}>
+            <Button type="submit" disabled={isTxBusy(setMaxSupply)}>
               {t('update')}
             </Button>
             <TxStatusIndicator txState={setMaxSupply.txState} />
@@ -541,7 +538,7 @@ function ChangeTokenTypeSection() {
                 ))}
               </select>
             </div>
-            <Button type="submit" disabled={isTxBusy(changeTokenType.txState)}>
+            <Button type="submit" disabled={isTxBusy(changeTokenType)}>
               {t('update')}
             </Button>
             <TxStatusIndicator txState={changeTokenType.txState} />
@@ -614,7 +611,7 @@ function UpdateMetadataSection() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isTxBusy(updateTokenMetadata.txState)}>
+              <Button type="submit" disabled={isTxBusy(updateTokenMetadata)}>
                 {t('update')}
               </Button>
               <TxStatusIndicator txState={updateTokenMetadata.txState} />
@@ -712,7 +709,7 @@ function MintBurnSection() {
                   type="submit"
                   variant="default"
                   className="bg-green-600 hover:bg-green-700"
-                  disabled={isTxBusy(mintTokens.txState)}
+                  disabled={isTxBusy(mintTokens)}
                 >
                   {t('mint')}
                 </Button>
@@ -743,7 +740,7 @@ function MintBurnSection() {
                 <Button
                   type="submit"
                   variant="destructive"
-                  disabled={isTxBusy(burnTokens.txState)}
+                  disabled={isTxBusy(burnTokens)}
                 >
                   {t('burn')}
                 </Button>
@@ -820,7 +817,7 @@ function TransferRestrictionSection() {
                   </option>
                 ))}
               </select>
-              <Button type="submit" disabled={isTxBusy(setTransferRestriction.txState)}>
+              <Button type="submit" disabled={isTxBusy(setTransferRestriction)}>
                 {t('update')}
               </Button>
               <TxStatusIndicator txState={setTransferRestriction.txState} />
@@ -839,15 +836,15 @@ function ListManagement({
   items,
   onAdd,
   onRemove,
-  addTxState,
-  removeTxState,
+  addMutation,
+  removeMutation,
 }: {
   title: string;
   items: string[];
   onAdd: (account: string) => void;
   onRemove: (account: string) => void;
-  addTxState: import('@/lib/types/models').TxState;
-  removeTxState: import('@/lib/types/models').TxState;
+  addMutation: { txState: import('@/lib/types/models').TxState };
+  removeMutation: { txState: import('@/lib/types/models').TxState };
 }) {
   const t = useTranslations('token');
   const { isReadOnly, isSuspended } = useEntityContext();
@@ -892,13 +889,13 @@ function ListManagement({
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={isTxBusy(addTxState)}
+                  disabled={isTxBusy(addMutation)}
                 >
                   {t('add')}
                 </Button>
               </div>
               {addressError && <p className="text-xs text-destructive">{addressError}</p>}
-              <TxStatusIndicator txState={addTxState} />
+              <TxStatusIndicator txState={addMutation.txState} />
             </form>
           </PermissionGuard>
         )}
@@ -916,7 +913,7 @@ function ListManagement({
                       variant="ghost"
                       size="sm"
                       onClick={() => onRemove(account)}
-                      disabled={isTxBusy(removeTxState)}
+                      disabled={isTxBusy(removeMutation)}
                       className="h-auto px-2 py-1 text-xs text-destructive hover:text-destructive"
                     >
                       {t('remove')}
@@ -1130,16 +1127,16 @@ export function TokenPage() {
               items={whitelist}
               onAdd={(account) => addToWhitelist.mutate([entityId, account])}
               onRemove={(account) => removeFromWhitelist.mutate([entityId, account])}
-              addTxState={addToWhitelist.txState}
-              removeTxState={removeFromWhitelist.txState}
+              addMutation={addToWhitelist}
+              removeMutation={removeFromWhitelist}
             />
             <ListManagement
               title={t('blacklist')}
               items={blacklist}
               onAdd={(account) => addToBlacklist.mutate([entityId, account])}
               onRemove={(account) => removeFromBlacklist.mutate([entityId, account])}
-              addTxState={addToBlacklist.txState}
-              removeTxState={removeFromBlacklist.txState}
+              addMutation={addToBlacklist}
+              removeMutation={removeFromBlacklist}
             />
           </div>
           <TokenRightsOverview />

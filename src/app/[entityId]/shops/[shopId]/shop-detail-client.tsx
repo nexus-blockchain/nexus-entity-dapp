@@ -7,6 +7,7 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { useShops } from '@/hooks/use-shops';
 import { useEntityQuery, hasPallet } from '@/hooks/use-entity-query';
 import { useEntityMutation } from '@/hooks/use-entity-mutation';
+import { isTxBusy, useTxLock } from '@/hooks/use-tx-lock';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
@@ -25,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Pencil, Check, X } from 'lucide-react';
 
 // ─── Constants ──────────────────────────────────────────────
@@ -47,12 +49,6 @@ function formatNexBalance(balance: bigint): string {
   const decStr = remainder.toString().padStart(12, '0').slice(0, 4);
   const trimmed = decStr.replace(/0+$/, '');
   return trimmed ? `${whole.toLocaleString()}.${trimmed}` : whole.toLocaleString();
-}
-
-// ─── Helpers ─────────────────────────────────────────────────
-
-function isTxBusy(m: { txState: { status: string } }): boolean {
-  return m.txState.status === 'signing' || m.txState.status === 'broadcasting';
 }
 
 // ─── Loading Skeleton ────────────────────────────────────────
@@ -288,6 +284,69 @@ function UpdatePointsForm({ shopId, currentConfig }: {
   );
 }
 
+// ─── Top-Up Dialog ──────────────────────────────────────────
+
+function TopUpDialog({
+  shopId,
+  onClose,
+}: {
+  shopId: number;
+  onClose: () => void;
+}) {
+  const [amount, setAmount] = useState('');
+  const { depositFund } = useShops();
+  const t = useTranslations('shops');
+  const tc = useTranslations('common');
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const parts = amount.trim().split('.');
+      const whole = parts[0] ?? '0';
+      const frac = (parts[1] ?? '').padEnd(12, '0').slice(0, 12);
+      const rawAmount = BigInt(whole) * BigInt('1000000000000') + BigInt(frac);
+      depositFund.mutate([shopId, rawAmount.toString()]);
+      setAmount('');
+      onClose();
+    },
+    [shopId, amount, depositFund, onClose],
+  );
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t('topUpFundTitle', { shopId })}</DialogTitle>
+          <DialogDescription>{t('detail.topUpDesc')}</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <LabelWithTip htmlFor="topup-detail-amount" tip={t('help.topUpAmount')}>{t('topUpAmount')}</LabelWithTip>
+            <Input
+              id="topup-detail-amount"
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.0"
+              required
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {tc('cancel')}
+            </Button>
+            <Button type="submit" disabled={!amount.trim()}>
+              {tc('confirm')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────
 
 export function ShopDetailPage() {
@@ -303,6 +362,7 @@ export function ShopDetailPage() {
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState('');
+  const [showTopUp, setShowTopUp] = useState(false);
 
   // Query points config separately from entityLoyalty pallet
   const pointsConfigQuery = useEntityQuery<ShopPointsConfig | null>(
@@ -426,12 +486,21 @@ export function ShopDetailPage() {
           </Badge>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md bg-muted px-4 py-3">
-            <p className="text-sm text-muted-foreground">{t('detail.operatingFund')}</p>
-            <p className="mt-1 text-xl font-bold">
-              {formatNexBalance(shop.fundBalance)}{' '}
-              <span className="text-sm font-normal text-muted-foreground">NEX</span>
-            </p>
+          <div className="flex items-center justify-between rounded-md bg-muted px-4 py-3">
+            <div>
+              <p className="text-sm text-muted-foreground">{t('detail.operatingFund')}</p>
+              <p className="mt-1 text-xl font-bold">
+                {formatNexBalance(shop.fundBalance)}{' '}
+                <span className="text-sm font-normal text-muted-foreground">NEX</span>
+              </p>
+            </div>
+            {!isReadOnly && !isSuspended && (
+              <PermissionGuard required={AdminPermission.SHOP_MANAGE} fallback={null}>
+                <Button size="sm" onClick={() => setShowTopUp(true)}>
+                  {t('detail.topUp')}
+                </Button>
+              </PermissionGuard>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -466,6 +535,11 @@ export function ShopDetailPage() {
             </CardContent>
           </Card>
         </PermissionGuard>
+      )}
+
+      {/* Top-Up Dialog */}
+      {showTopUp && (
+        <TopUpDialog shopId={shop.id} onClose={() => setShowTopUp(false)} />
       )}
     </div>
   );

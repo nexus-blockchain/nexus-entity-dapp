@@ -295,6 +295,14 @@ export function useEntityToken() {
     invalidateKeys: [['entity', entityId, 'token']],
   });
 
+  const distributeDividend = useEntityMutation('entityToken', 'distributeDividend', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
+  const claimDividend = useEntityMutation('entityToken', 'claimDividend', {
+    invalidateKeys: [['entity', entityId, 'token']],
+  });
+
   return {
     assetId,
     tokenConfig: tokenConfigQuery.data ?? null,
@@ -319,5 +327,7 @@ export function useEntityToken() {
     setMaxSupply,
     changeTokenType,
     updateTokenMetadata,
+    distributeDividend,
+    claimDividend,
   };
 }

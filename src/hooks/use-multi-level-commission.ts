@@ -12,10 +12,10 @@ function parseMultiLevelTier(raw: unknown): MultiLevelTier {
   const obj = (raw as any)?.toJSON?.() ?? raw ?? {};
   return {
     rate: Number(obj.rate ?? 0),
-    requiredDirects: Number(obj.requiredDirects ?? obj.required_directs ?? 0),
-    requiredTeamSize: Number(obj.requiredTeamSize ?? obj.required_team_size ?? 0),
-    requiredSpent: BigInt(String(obj.requiredSpent ?? obj.required_spent ?? 0)),
-    requiredLevelId: Number(obj.requiredLevelId ?? obj.required_level_id ?? 0),
+    directMin: Number(obj.directMin ?? obj.direct_min ?? obj.requiredDirects ?? obj.required_directs ?? 0),
+    teamMin: Number(obj.teamMin ?? obj.team_min ?? obj.requiredTeamSize ?? obj.required_team_size ?? 0),
+    spentMin: BigInt(String(obj.spentMin ?? obj.spent_min ?? obj.requiredSpent ?? obj.required_spent ?? 0)),
+    levelMin: Number(obj.levelMin ?? obj.level_min ?? obj.requiredLevelId ?? obj.required_level_id ?? 0),
   };
 }
 
@@ -24,11 +24,10 @@ function parseMultiLevelConfig(raw: unknown): MultiLevelConfig | null {
   const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
   if (!unwrapped) return null;
   const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  console.log('[MultiLevel] raw config toJSON:', JSON.stringify(obj, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
   const tiers = obj.levels ?? obj.tiers ?? [];
   return {
     tiers: Array.isArray(tiers) ? tiers.map(parseMultiLevelTier) : [],
-    maxTotalRate: Number(obj.maxTotalRate ?? obj.max_total_rate ?? 0),
+    maxLevelsDeep: Number(obj.maxLevelsDeep ?? obj.max_levels_deep ?? obj.maxTotalRate ?? obj.max_total_rate ?? 0),
   };
 }
 

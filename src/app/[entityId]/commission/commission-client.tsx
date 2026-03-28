@@ -782,13 +782,14 @@ function CommissionPreviewSection() {
       case CommissionPlugin.MultiLevel: {
         const mc = multiLevel.config;
         if (mc) {
-          mc.tiers.forEach((tier, i) => {
+          mc.levels.forEach((tier, i) => {
             rates.push({ label: `L${i}`, value: bpsDisplay(tier.rate) });
+            rates.push({ label: `L${i} directs`, value: String(tier.requiredDirects) });
+            rates.push({ label: `L${i} team`, value: String(tier.requiredTeamSize) });
+            rates.push({ label: `L${i} spend`, value: String(tier.requiredSpent) });
+            rates.push({ label: `L${i} level`, value: String(tier.requiredLevelId) });
             theoreticalMax += amount * tier.rate / 10000;
           });
-          if (mc.maxLevelsDeep > 0) {
-            rates.push({ label: 'maxLevelsDeep', value: bpsDisplay(mc.maxLevelsDeep) });
-          }
         }
         break;
       }
@@ -837,13 +838,18 @@ function CommissionPreviewSection() {
       case CommissionPlugin.PoolReward: {
         const prc = poolReward.config;
         if (prc) {
-          prc.levelRatios.forEach(([level, ratio]) => {
-            rates.push({ label: `${t('levelRatio')} L${level}`, value: `${ratio / 100}%` });
+          prc.levelRules.forEach(([level, rule]) => {
+            rates.push({ label: `${t('levelRatio')} L${level}`, value: `${rule.baseCapPercent / 100}%` });
+            rates.push({ label: `${t('capBehavior')} L${level}`, value: rule.capBehavior.type });
+            if (rule.capBehavior.type === 'UnlockByTeam') {
+              rates.push({ label: `${t('directPerUnlock')} L${level}`, value: String(rule.capBehavior.directPerUnlock) });
+              rates.push({ label: `${t('teamPerUnlock')} L${level}`, value: String(rule.capBehavior.teamPerUnlock) });
+              rates.push({ label: `${t('unlockPercent')} L${level}`, value: `${rule.capBehavior.unlockPercent / 100}%` });
+            }
           });
           if (prc.roundDuration > 0) {
             rates.push({ label: t('roundDuration'), value: `${prc.roundDuration} blocks` });
           }
-          // Pool reward distributes from unallocated pool, theoretical max is the cap or budget
           theoreticalMax = effectiveBudget;
         }
         break;
@@ -1667,11 +1673,9 @@ function WithdrawSection() {
 
   const [nexAmount, setNexAmount] = useState('');
   const [nexRepurchaseRate, setNexRepurchaseRate] = useState('');
-  const [nexRepurchaseTarget, setNexRepurchaseTarget] = useState('');
 
   const [tokenAmount, setTokenAmount] = useState('');
   const [tokenRepurchaseRate, setTokenRepurchaseRate] = useState('');
-  const [tokenRepurchaseTarget, setTokenRepurchaseTarget] = useState('');
 
   const paused = isWithdrawalPaused;
 
@@ -1682,13 +1686,11 @@ function WithdrawSection() {
       withdrawNex.mutate([
         nexAmount.trim(),
         nexRepurchaseRate.trim() ? Number(nexRepurchaseRate) : null,
-        nexRepurchaseTarget.trim() || null,
       ]);
       setNexAmount('');
       setNexRepurchaseRate('');
-      setNexRepurchaseTarget('');
     },
-    [nexAmount, nexRepurchaseRate, nexRepurchaseTarget, withdrawNex, isLocked],
+    [nexAmount, nexRepurchaseRate, withdrawNex, isLocked],
   );
 
   const handleWithdrawToken = useCallback(
@@ -1698,13 +1700,11 @@ function WithdrawSection() {
       withdrawToken.mutate([
         tokenAmount.trim(),
         tokenRepurchaseRate.trim() ? Number(tokenRepurchaseRate) : null,
-        tokenRepurchaseTarget.trim() || null,
       ]);
       setTokenAmount('');
       setTokenRepurchaseRate('');
-      setTokenRepurchaseTarget('');
     },
-    [tokenAmount, tokenRepurchaseRate, tokenRepurchaseTarget, withdrawToken, isLocked],
+    [tokenAmount, tokenRepurchaseRate, withdrawToken, isLocked],
   );
 
   return (
@@ -1748,29 +1748,16 @@ function WithdrawSection() {
                     disabled={paused}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <LabelWithTip htmlFor="nex-wd-repurchase-rate" tip={t('help.requestedRepurchaseRate')}>{t('requestedRepurchaseRate')}</LabelWithTip>
-                    <Input
-                      id="nex-wd-repurchase-rate"
-                      type="number"
-                      value={nexRepurchaseRate}
-                      onChange={(e) => setNexRepurchaseRate(e.target.value)}
-                      placeholder="bps"
-                      disabled={paused}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <LabelWithTip htmlFor="nex-wd-target" tip={t('help.repurchaseTarget')}>{t('repurchaseTarget')}</LabelWithTip>
-                    <Input
-                      id="nex-wd-target"
-                      type="text"
-                      value={nexRepurchaseTarget}
-                      onChange={(e) => setNexRepurchaseTarget(e.target.value)}
-                      placeholder="account address"
-                      disabled={paused}
-                    />
-                  </div>
+                <div className="max-w-xs space-y-2">
+                  <LabelWithTip htmlFor="nex-wd-repurchase-rate" tip={t('help.requestedRepurchaseRate')}>{t('requestedRepurchaseRate')}</LabelWithTip>
+                  <Input
+                    id="nex-wd-repurchase-rate"
+                    type="number"
+                    value={nexRepurchaseRate}
+                    onChange={(e) => setNexRepurchaseRate(e.target.value)}
+                    placeholder="bps"
+                    disabled={paused}
+                  />
                 </div>
                 <div className="flex items-center gap-3">
                   <Button type="submit" disabled={paused || isLocked}>
@@ -1804,29 +1791,16 @@ function WithdrawSection() {
                     disabled={paused}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <LabelWithTip htmlFor="token-wd-repurchase-rate" tip={t('help.requestedRepurchaseRate')}>{t('requestedRepurchaseRate')}</LabelWithTip>
-                    <Input
-                      id="token-wd-repurchase-rate"
-                      type="number"
-                      value={tokenRepurchaseRate}
-                      onChange={(e) => setTokenRepurchaseRate(e.target.value)}
-                      placeholder="bps"
-                      disabled={paused}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <LabelWithTip htmlFor="token-wd-target" tip={t('help.repurchaseTarget')}>{t('repurchaseTarget')}</LabelWithTip>
-                    <Input
-                      id="token-wd-target"
-                      type="text"
-                      value={tokenRepurchaseTarget}
-                      onChange={(e) => setTokenRepurchaseTarget(e.target.value)}
-                      placeholder="account address"
-                      disabled={paused}
-                    />
-                  </div>
+                <div className="max-w-xs space-y-2">
+                  <LabelWithTip htmlFor="token-wd-repurchase-rate" tip={t('help.requestedRepurchaseRate')}>{t('requestedRepurchaseRate')}</LabelWithTip>
+                  <Input
+                    id="token-wd-repurchase-rate"
+                    type="number"
+                    value={tokenRepurchaseRate}
+                    onChange={(e) => setTokenRepurchaseRate(e.target.value)}
+                    placeholder="bps"
+                    disabled={paused}
+                  />
                 </div>
                 <div className="flex items-center gap-3">
                   <Button type="submit" disabled={paused || isLocked}>

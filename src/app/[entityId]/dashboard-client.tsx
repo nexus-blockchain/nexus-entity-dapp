@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useEntityContext } from './entity-provider';
 import { useMembers } from '@/hooks/use-members';
 import { useEntityToken } from '@/hooks/use-entity-token';
@@ -27,6 +28,10 @@ import {
   Zap, Eye, CircleDollarSign, Gavel,
 } from 'lucide-react';
 import { CopyableAddress } from '@/components/copyable-address';
+const EntityFundsChart = dynamic(
+  () => import('@/components/entity-funds-chart').then((m) => m.EntityFundsChart),
+  { ssr: false, loading: () => <Skeleton className="h-[420px] w-full" /> },
+);
 import { formatNex } from '@/lib/utils/format';
 
 const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'> = {
@@ -250,6 +255,58 @@ function GovernanceSummaryCard({ entityId }: { entityId: number }) {
         <div className="flex justify-end">
           <Link href={`/${entityId}/governance`} className="text-xs text-primary hover:underline">
             {t('viewAllProposals')}
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MemberSummaryCard({ entityId }: { entityId: number }) {
+  const { members, memberCount, isLoading } = useMembers();
+  const t = useTranslations('dashboard');
+
+  const upgradeEligibleTotal = useMemo(
+    () => members.reduce((sum, member) => sum + member.upgradeEligibleSpent, BigInt(0)),
+    [members],
+  );
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <Skeleton className="h-5 w-32" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base">{t('memberOverview')}</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-0.5">
+            <p className="text-xs text-muted-foreground">{t('totalMembers')}</p>
+            <p className="text-lg font-semibold">{memberCount}</p>
+          </div>
+          <div className="space-y-0.5">
+            <p className="text-xs text-muted-foreground">{t('upgradeEligibleSpent')}</p>
+            <p className="text-sm font-semibold">{formatNex(upgradeEligibleTotal)}</p>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Link href={`/${entityId}/members`} className="text-xs text-primary hover:underline">
+            {t('manageMembers')}
           </Link>
         </div>
       </CardContent>
@@ -775,8 +832,10 @@ export function DashboardPage() {
 
       {/* Module detail cards */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <EntityFundsChart />
         <ShopOverviewCard entityId={entityId} />
         <TokenSummaryCard entityId={entityId} />
+        <MemberSummaryCard entityId={entityId} />
         {hasMarket && <MarketSummaryCard entityId={entityId} />}
         {hasGovernance && <GovernanceSummaryCard entityId={entityId} />}
         {hasCommission && <CommissionSummaryCard entityId={entityId} />}

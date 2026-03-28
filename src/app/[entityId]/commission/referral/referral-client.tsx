@@ -512,88 +512,6 @@ function CommissionCapConfigSection() {
   );
 }
 
-// ─── Referral Validity Config Section ───────────────────────
-
-function ReferralValidityConfigSection() {
-  const t = useTranslations('referral');
-  const { entityId } = useEntityContext();
-  const { validityConfig, setReferralValidityConfig } = useReferralCommission();
-  const { isLocked, setLocked } = useTxLock();
-
-  const [validityBlocks, setValidityBlocks] = useState('');
-  const [validOrders, setValidOrders] = useState('');
-
-  const localBusy = isTxBusy(setReferralValidityConfig);
-  useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (isLocked) return;
-      setReferralValidityConfig.mutate([
-        entityId,
-        Number(validityBlocks) || 0,
-        Number(validOrders) || 0,
-      ]);
-    },
-    [entityId, validityBlocks, validOrders, setReferralValidityConfig, isLocked],
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('referralValidityConfig')}</CardTitle>
-        <CardDescription>{t('referralValidityConfigDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('validityBlocks')}</p>
-            <p className="text-sm font-medium">{validityConfig?.validityBlocks ?? 0}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('validOrders')}</p>
-            <p className="text-sm font-medium">{validityConfig?.validOrders ?? 0}</p>
-          </div>
-        </div>
-
-        <Separator className="my-4" />
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 max-w-lg">
-            <div className="space-y-2">
-              <LabelWithTip htmlFor="ref-validity-blocks" tip={t('help.validityBlocks')}>{t('validityBlocks')}</LabelWithTip>
-              <Input
-                id="ref-validity-blocks"
-                type="number"
-                value={validityBlocks}
-                onChange={(e) => setValidityBlocks(e.target.value)}
-                placeholder={String(validityConfig?.validityBlocks ?? 0)}
-              />
-            </div>
-            <div className="space-y-2">
-              <LabelWithTip htmlFor="ref-valid-orders" tip={t('help.validOrders')}>{t('validOrders')}</LabelWithTip>
-              <Input
-                id="ref-valid-orders"
-                type="number"
-                value={validOrders}
-                onChange={(e) => setValidOrders(e.target.value)}
-                placeholder={String(validityConfig?.validOrders ?? 0)}
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button type="submit" disabled={isLocked}>
-              {t('setReferralValidityConfig')}
-            </Button>
-            <TxStatusIndicator txState={setReferralValidityConfig.txState} />
-          </div>
-        </form>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Clear Config Section ───────────────────────────────────
 
 function ClearConfigSection() {
@@ -760,7 +678,6 @@ export function ReferralPage() {
             <RepeatPurchaseConfigSection />
             <ReferrerGuardConfigSection />
             <CommissionCapConfigSection />
-            <ReferralValidityConfigSection />
             <ClearConfigSection />
           </div>
         </PermissionGuard>

@@ -229,55 +229,6 @@ function PolicySection({ shopId }: { shopId: number | null }) {
   );
 }
 
-// ─── Stats Policy Section ───────────────────────────────────
-
-function StatsPolicySection({ shopId }: { shopId: number | null }) {
-  const t = useTranslations('members');
-  const tc = useTranslations('common');
-  const { statsPolicy, setStatsPolicy } = useMembers();
-  const [localPolicy, setLocalPolicy] = useState<number | null>(null);
-  const current = localPolicy ?? statsPolicy;
-
-  const toggleBit = useCallback((bit: number) => {
-    setLocalPolicy((prev) => (prev ?? statsPolicy) ^ bit);
-  }, [statsPolicy]);
-
-  const handleSave = useCallback(() => {
-    if (localPolicy !== null && localPolicy !== statsPolicy && shopId) {
-      setStatsPolicy.mutate([shopId, localPolicy]);
-      setLocalPolicy(null);
-    }
-  }, [shopId, localPolicy, statsPolicy, setStatsPolicy]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('statsPolicy')}</CardTitle>
-        <CardDescription>{t('statsPolicyDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {STATS_POLICY_FLAGS.map(({ bit, key, descKey }) => (
-          <div key={bit} className="flex items-start space-x-3">
-            <Switch id={`stats-${bit}`} checked={(current & bit) !== 0} onCheckedChange={() => toggleBit(bit)} />
-            <div className="grid gap-0.5">
-              <Label htmlFor={`stats-${bit}`} className="cursor-pointer font-medium">{t(key)}</Label>
-              <p className="text-xs text-muted-foreground">{t(descKey)}</p>
-            </div>
-          </div>
-        ))}
-      </CardContent>
-      {localPolicy !== null && localPolicy !== statsPolicy && (
-        <CardFooter className="gap-3">
-          <Button onClick={handleSave} disabled={isTxBusy(setStatsPolicy) || !shopId}>{t('savePolicy')}</Button>
-          <Button variant="ghost" onClick={() => setLocalPolicy(null)}>{tc('reset')}</Button>
-          <TxStatusIndicator txState={setStatsPolicy.txState} />
-          {!shopId && <span className="text-xs text-destructive">{t('selectShopFirst')}</span>}
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
-
 // ─── Pending Members Section (Enhanced) ─────────────────────
 
 function PendingSection({ shopId }: { shopId: number | null }) {
@@ -582,6 +533,7 @@ function MemberTable({ members, expandedAccount, setExpandedAccount, shopId }: {
               </div>
               <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
                 <span>{t('spent')}: {formatNex(m.totalSpent)} NEX</span>
+                <span>{t('upgradeEligibleSpent')}: {formatNex(m.upgradeEligibleSpent)} NEX</span>
                 <span>{t('orderCount')}: {m.orderCount}</span>
                 {m.referrer && <span className="inline-flex items-center gap-1">{t('referrer')}: <CopyableAddress address={m.referrer} textClassName="text-xs" /></span>}
               </div>
@@ -665,7 +617,6 @@ export function MembersPage() {
       <PermissionGuard required={AdminPermission.MEMBER_MANAGE} fallback={null}>
         <Card><CardContent className="pt-6"><ShopSelector shopId={shopId} onShopChange={setSelectedShopId} /></CardContent></Card>
         <PolicySection shopId={shopId} />
-        <StatsPolicySection shopId={shopId} />
         <PendingSection shopId={shopId} />
       </PermissionGuard>
 

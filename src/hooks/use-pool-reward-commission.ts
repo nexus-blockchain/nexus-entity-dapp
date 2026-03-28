@@ -10,6 +10,9 @@ import type {
   PoolRewardRoundInfo,
   PoolRewardClaimRecord,
   LevelSnapshot,
+  LevelClaimRule,
+  CapBehavior,
+  FundingSummary,
 } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
@@ -21,16 +24,53 @@ function unwrapRaw(raw: unknown): any | null {
   return (unwrapped as any).toJSON?.() ?? unwrapped;
 }
 
+function parseCapBehavior(raw: unknown): CapBehavior {
+  const obj = (raw as any)?.toJSON?.() ?? raw;
+  if (typeof obj === 'string') return { type: obj as 'Fixed' };
+  if (obj && typeof obj === 'object' && 'UnlockByTeam' in obj) {
+    const inner = (obj as { UnlockByTeam?: Record<string, unknown> }).UnlockByTeam ?? {};
+    return {
+      type: 'UnlockByTeam',
+      directPerUnlock: Number(inner.direct_per_unlock ?? inner.directPerUnlock ?? 0),
+      teamPerUnlock: Number(inner.team_per_unlock ?? inner.teamPerUnlock ?? 0),
+      unlockPercent: Number(inner.unlock_percent ?? inner.unlockPercent ?? 0),
+    };
+  }
+  return { type: 'Fixed' };
+}
+
+function parseLevelClaimRule(raw: unknown): LevelClaimRule {
+  const obj = (raw as any)?.toJSON?.() ?? raw ?? {};
+  return {
+    baseCapPercent: Number(obj.baseCapPercent ?? obj.base_cap_percent ?? 0),
+    capBehavior: parseCapBehavior(obj.capBehavior ?? obj.cap_behavior),
+  };
+}
+
+function parseFundingSummary(raw: unknown): FundingSummary | null {
+  if (!raw) return null;
+  const obj = (raw as any)?.toJSON?.() ?? raw ?? {};
+  return {
+    nexCommissionRemainder: BigInt(String(obj.nexCommissionRemainder ?? obj.nex_commission_remainder ?? 0)),
+    tokenPlatformFeeRetention: BigInt(String(obj.tokenPlatformFeeRetention ?? obj.token_platform_fee_retention ?? 0)),
+    tokenCommissionRemainder: BigInt(String(obj.tokenCommissionRemainder ?? obj.token_commission_remainder ?? 0)),
+    nexCancelReturn: BigInt(String(obj.nexCancelReturn ?? obj.nex_cancel_return ?? 0)),
+    totalFundingCount: Number(obj.totalFundingCount ?? obj.total_funding_count ?? 0),
+  };
+}
+
 function parsePoolRewardConfig(raw: unknown): PoolRewardConfig | null {
   const obj = unwrapRaw(raw);
   if (!obj) return null;
-  const ratios = obj.levelRatios ?? obj.level_ratios ?? [];
+  const rules = obj.levelRules ?? obj.level_rules ?? [];
   return {
-    levelRatios: Array.isArray(ratios)
-      ? ratios.map((r: unknown) => {
-          if (Array.isArray(r)) return [Number(r[0]), Number(r[1])] as [number, number];
-          const ro = (r as any)?.toJSON?.() ?? r ?? {};
-          return [Number(ro[0] ?? ro.level ?? 0), Number(ro[1] ?? ro.ratio ?? 0)] as [number, number];
+    levelRules: Array.isArray(rules)
+      ? rules.map((entry: unknown) => {
+          if (Array.isArray(entry)) {
+            return [Number(entry[0]), parseLevelClaimRule(entry[1])] as [number, LevelClaimRule];
+          }
+          const ruleObj = (entry as any)?.toJSON?.() ?? entry ?? {};
+          return [Number(ruleObj[0] ?? ruleObj.levelId ?? ruleObj.level_id ?? 0), parseLevelClaimRule(ruleObj[1] ?? ruleObj.rule)] as [number, LevelClaimRule];
         })
       : [],
     roundDuration: Number(obj.roundDuration ?? obj.round_duration ?? 0),
@@ -43,7 +83,6 @@ function parseLevelSnapshot(raw: unknown): LevelSnapshot {
   return {
     levelId: Number(obj.levelId ?? obj.level_id ?? 0),
     memberCount: Number(obj.memberCount ?? obj.member_count ?? 0),
-    perMemberReward: BigInt(String(obj.perMemberReward ?? obj.per_member_reward ?? 0)),
     claimedCount: Number(obj.claimedCount ?? obj.claimed_count ?? 0),
   };
 }
@@ -57,17 +96,26 @@ function parseRoundInfo(raw: unknown): PoolRewardRoundInfo | null {
   const obj = unwrapRaw(raw);
   if (!obj) return null;
 
-  const tokenSnaps = obj.tokenLevelSnapshots ?? obj.token_level_snapshots ?? null;
+  const tokenSnaps = obj.tokenLevelSnapshots ?? obj.token_level_snapshots ?? obj.tokenLevelQuotas ?? obj.token_level_quotas ?? null;
 
   return {
     roundId: Number(obj.roundId ?? obj.round_id ?? 0),
     startBlock: Number(obj.startBlock ?? obj.start_block ?? 0),
+    endBlock: obj.endBlock != null || obj.end_block != null ? Number(obj.endBlock ?? obj.end_block ?? 0) : null,
     poolSnapshot: BigInt(String(obj.poolSnapshot ?? obj.pool_snapshot ?? 0)),
-    levelSnapshots: parseLevelSnapshots(obj.levelSnapshots ?? obj.level_snapshots),
+    eligibleCount: Number(obj.eligibleCount ?? obj.eligible_count ?? 0),
+    perMemberReward: BigInt(String(obj.perMemberReward ?? obj.per_member_reward ?? 0)),
+    claimedCount: Number(obj.claimedCount ?? obj.claimed_count ?? 0),
+    levelSnapshots: parseLevelSnapshots(obj.levelSnapshots ?? obj.level_snapshots ?? obj.levelQuotas ?? obj.level_quotas),
     tokenPoolSnapshot: obj.tokenPoolSnapshot != null || obj.token_pool_snapshot != null
       ? BigInt(String(obj.tokenPoolSnapshot ?? obj.token_pool_snapshot ?? 0))
       : null,
+    tokenPerMemberReward: obj.tokenPerMemberReward != null || obj.token_per_member_reward != null
+      ? BigInt(String(obj.tokenPerMemberReward ?? obj.token_per_member_reward ?? 0))
+      : null,
+    tokenClaimedCount: Number(obj.tokenClaimedCount ?? obj.token_claimed_count ?? 0),
     tokenLevelSnapshots: tokenSnaps ? parseLevelSnapshots(tokenSnaps) : null,
+    fundingSummary: parseFundingSummary(obj.fundingSummary ?? obj.funding_summary),
   };
 }
 

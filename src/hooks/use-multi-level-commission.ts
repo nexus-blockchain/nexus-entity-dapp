@@ -12,10 +12,10 @@ function parseMultiLevelTier(raw: unknown): MultiLevelTier {
   const obj = (raw as any)?.toJSON?.() ?? raw ?? {};
   return {
     rate: Number(obj.rate ?? 0),
-    directMin: Number(obj.directMin ?? obj.direct_min ?? obj.requiredDirects ?? obj.required_directs ?? 0),
-    teamMin: Number(obj.teamMin ?? obj.team_min ?? obj.requiredTeamSize ?? obj.required_team_size ?? 0),
-    spentMin: BigInt(String(obj.spentMin ?? obj.spent_min ?? obj.requiredSpent ?? obj.required_spent ?? 0)),
-    levelMin: Number(obj.levelMin ?? obj.level_min ?? obj.requiredLevelId ?? obj.required_level_id ?? 0),
+    requiredDirects: Number(obj.requiredDirects ?? obj.required_directs ?? obj.directMin ?? obj.direct_min ?? 0),
+    requiredTeamSize: Number(obj.requiredTeamSize ?? obj.required_team_size ?? obj.teamMin ?? obj.team_min ?? 0),
+    requiredSpent: BigInt(String(obj.requiredSpent ?? obj.required_spent ?? obj.spentMin ?? obj.spent_min ?? 0)),
+    requiredLevelId: Number(obj.requiredLevelId ?? obj.required_level_id ?? obj.levelMin ?? obj.level_min ?? 0),
   };
 }
 
@@ -24,10 +24,9 @@ function parseMultiLevelConfig(raw: unknown): MultiLevelConfig | null {
   const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
   if (!unwrapped) return null;
   const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  const tiers = obj.levels ?? obj.tiers ?? [];
+  const levels = obj.levels ?? [];
   return {
-    tiers: Array.isArray(tiers) ? tiers.map(parseMultiLevelTier) : [],
-    maxLevelsDeep: Number(obj.maxLevelsDeep ?? obj.max_levels_deep ?? obj.maxTotalRate ?? obj.max_total_rate ?? 0),
+    levels: Array.isArray(levels) ? levels.map(parseMultiLevelTier) : [],
   };
 }
 
@@ -38,7 +37,7 @@ function parseMultiLevelStats(raw: unknown): MultiLevelStats | null {
   const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
   return {
     totalDistributed: BigInt(String(obj.totalDistributed ?? obj.total_distributed ?? 0)),
-    totalOrders: Number(obj.totalOrders ?? obj.total_orders ?? 0),
+    orderCount: Number(obj.orderCount ?? obj.order_count ?? 0),
     totalDistributionEntries: Number(obj.totalDistributionEntries ?? obj.total_distribution_entries ?? 0),
   };
 }
@@ -136,8 +135,8 @@ export function useMultiLevelCommission() {
 
   // ─── Mutations ──────────────────────────────────────────
   // Available chain extrinsics:
-  // setMultiLevelConfig(entityId, levels:Vec<MultiLevelTier>, maxTotalRate:u16)
-  // updateMultiLevelParams(entityId, maxTotalRate:Option<u16>, tierIndex:Option<u32>, tierUpdate:Option<Tier>)
+  // setMultiLevelConfig(entityId, levels:Vec<MultiLevelTier>)
+  // updateMultiLevelParams(entityId, tierIndex:Option<u32>, tierUpdate:Option<Tier>)
   // addTier(entityId, index:u32, tier:Tier)
   // removeTier(entityId, index:u32)
   // clearMultiLevelConfig(entityId)

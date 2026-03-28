@@ -6,14 +6,14 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
-import type { LevelSnapshot, PoolRewardClaimRecord } from '@/lib/types/models';
+import type { LevelSnapshot, PoolRewardClaimRecord, CapBehavior } from '@/lib/types/models';
 import { usePoolRewardCommission } from '@/hooks/use-pool-reward-commission';
 import { useMembers } from '@/hooks/use-members';
 import { useCurrentBlock } from '@/hooks/use-current-block';
 import { useWalletStore } from '@/stores/wallet-store';
 import { useTxLock, isTxBusy } from '@/hooks/use-tx-lock';
 import { useTranslations } from 'next-intl';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,7 +36,7 @@ function formatNex(planck: bigint): string {
   return `${whole.toLocaleString()}.${fracStr.slice(0, 4)}`;
 }
 
-/** Format ratio basis points to percentage */
+/** Format baseCapPercent basis points to percentage */
 function bpsToPercent(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`;
 }
@@ -66,12 +66,25 @@ function PoolRewardSkeleton() {
   );
 }
 
-// ─── Level Ratio Row Type ────────────────────────────────────
+// ─── Level Rule Row Type ─────────────────────────────────────
 
-interface LevelRatioRow {
+interface LevelRuleRow {
   levelId: string;
-  ratio: string;
+  baseCapPercent: string;
+  behaviorType: CapBehavior['type'];
+  directPerUnlock: string;
+  teamPerUnlock: string;
+  unlockPercent: string;
 }
+
+const emptyRuleRow = (): LevelRuleRow => ({
+  levelId: '',
+  baseCapPercent: '',
+  behaviorType: 'Fixed',
+  directPerUnlock: '',
+  teamPerUnlock: '',
+  unlockPercent: '',
+});
 
 // ─── Config Section (Admin) ─────────────────────────────────
 
@@ -91,7 +104,7 @@ function ConfigSection() {
   const { isLocked, setLocked } = useTxLock();
 
   // ── Local editing state ──────────────────────────────────
-  const [localRatios, setLocalRatios] = useState<LevelRatioRow[]>([]);
+  const [localRules, setLocalRules] = useState<LevelRuleRow[]>([]);
   const [roundDuration, setRoundDuration] = useState('');
   const [formError, setFormError] = useState('');
 
@@ -101,30 +114,34 @@ function ConfigSection() {
 
   // ── Sync chain config → local state (only when not dirty) ──
   const isDirty = useMemo(() => {
-    const chainRatios = config?.levelRatios ?? [];
-    if (localRatios.length !== chainRatios.length) return true;
-    for (let i = 0; i < localRatios.length; i++) {
-      const [cId, cRatio] = chainRatios[i] ?? [0, 0];
-      if (localRatios[i].levelId !== String(cId) || localRatios[i].ratio !== String(cRatio)) return true;
+    const chainRules = config?.levelRules ?? [];
+    if (localRules.length !== chainRules.length) return true;
+    for (let i = 0; i < localRules.length; i++) {
+      const [cId, cRule] = chainRules[i] ?? [0, { baseCapPercent: 0 }];
+      if (localRules[i].levelId !== String(cId) || localRules[i].baseCapPercent !== String(cRule.baseCapPercent ?? 0)) return true;
     }
     const chainDuration = config?.roundDuration ?? 0;
     if (roundDuration !== '' && Number(roundDuration) !== chainDuration) return true;
     return false;
-  }, [localRatios, config, roundDuration]);
+  }, [localRules, config, roundDuration]);
 
   useEffect(() => {
-    if (config?.levelRatios && !isDirty) {
-      setLocalRatios(
-        config.levelRatios.map(([id, ratio]) => ({
+    if (config?.levelRules && !isDirty) {
+      setLocalRules(
+        config.levelRules.map(([id, rule]) => ({
           levelId: String(id),
-          ratio: String(ratio),
+          baseCapPercent: String(rule.baseCapPercent),
+          behaviorType: rule.capBehavior.type,
+          directPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.directPerUnlock) : '',
+          teamPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.teamPerUnlock) : '',
+          unlockPercent: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.unlockPercent) : '',
         })),
       );
-    } else if (!config?.levelRatios && localRatios.length === 0) {
-      setLocalRatios([{ levelId: '', ratio: '' }]);
+    } else if (!config?.levelRules && localRules.length === 0) {
+      setLocalRules([emptyRuleRow()]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.levelRatios]);
+  }, [config?.levelRules]);
 
   // Build a map from level ID to level name for display
   const levelNameById = useMemo(() => {
@@ -138,43 +155,50 @@ function ConfigSection() {
   // Selected level IDs (for filtering available levels in each row's dropdown)
   const getAvailableLevels = useCallback(
     (currentLevelId: string) => {
-      const usedIds = new Set(localRatios.map((r) => r.levelId).filter(Boolean));
+      const usedIds = new Set(localRules.map((r) => r.levelId).filter(Boolean));
       return customLevels.filter(
         (level) => String(level.id) === currentLevelId || !usedIds.has(String(level.id)),
       );
     },
-    [customLevels, localRatios],
+    [customLevels, localRules],
   );
 
-  // Ratio sum for display
-  const ratioSum = useMemo(() => {
-    return localRatios.reduce((s, r) => s + (Number(r.ratio) || 0), 0);
-  }, [localRatios]);
+  // Rule sum for display
+  const ruleSum = useMemo(() => {
+    return localRules.reduce((s, r) => s + (Number(r.baseCapPercent) || 0), 0);
+  }, [localRules]);
 
   // ── Row handlers ───────────────────────────────────────────
-  const handleRowChange = useCallback((index: number, field: keyof LevelRatioRow, value: string) => {
-    setLocalRatios((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  const handleRowChange = useCallback((index: number, field: keyof LevelRuleRow, value: string) => {
+    setLocalRules((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }, []);
 
   const handleDeleteRow = useCallback((index: number) => {
-    if (localRatios.length <= 1) {
+    if (localRules.length <= 1) {
       setFormError(t('errorMinOneLevel'));
       return;
     }
-    setLocalRatios((prev) => prev.filter((_, i) => i !== index));
-  }, [localRatios.length, t]);
+    setLocalRules((prev) => prev.filter((_, i) => i !== index));
+  }, [localRules.length, t]);
 
   const handleAddRow = useCallback(() => {
-    setLocalRatios((prev) => [...prev, { levelId: '', ratio: '' }]);
+    setLocalRules((prev) => [...prev, emptyRuleRow()]);
   }, []);
 
   // ── Cancel all changes ───────────────────────────────────
   const handleCancelChanges = useCallback(() => {
-    const chainRatios = config?.levelRatios ?? [];
-    setLocalRatios(
-      chainRatios.length > 0
-        ? chainRatios.map(([id, ratio]) => ({ levelId: String(id), ratio: String(ratio) }))
-        : [{ levelId: '', ratio: '' }],
+    const chainRules = config?.levelRules ?? [];
+    setLocalRules(
+      chainRules.length > 0
+        ? chainRules.map(([id, rule]) => ({
+            levelId: String(id),
+            baseCapPercent: String(rule.baseCapPercent),
+            behaviorType: rule.capBehavior.type,
+            directPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.directPerUnlock) : '',
+            teamPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.teamPerUnlock) : '',
+            unlockPercent: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.unlockPercent) : '',
+          }))
+        : [emptyRuleRow()],
     );
     setRoundDuration('');
     setFormError('');
@@ -186,16 +210,30 @@ function ConfigSection() {
       e.preventDefault();
       if (isLocked) return;
       setFormError('');
-      const ratios: [number, number][] = localRatios
-        .filter((r) => r.levelId && r.ratio)
-        .map((r) => [Number(r.levelId), Number(r.ratio)]);
-      if (ratios.length === 0) {
-        setFormError(t('errorNoLevelRatios'));
+      const levelRules = localRules
+        .filter((r) => r.levelId && r.baseCapPercent)
+        .map((r) => [
+          Number(r.levelId),
+          {
+            base_cap_percent: Number(r.baseCapPercent),
+            cap_behavior: r.behaviorType === 'UnlockByTeam'
+              ? {
+                  UnlockByTeam: {
+                    direct_per_unlock: Number(r.directPerUnlock) || 0,
+                    team_per_unlock: Number(r.teamPerUnlock) || 0,
+                    unlock_percent: Number(r.unlockPercent) || 0,
+                  },
+                }
+              : 'Fixed',
+          },
+        ] as const);
+      if (levelRules.length === 0) {
+        setFormError(t('errorNoLevelRules'));
         return;
       }
-      const sum = ratios.reduce((s, [, r]) => s + r, 0);
+      const sum = levelRules.reduce((s, [, rule]) => s + rule.base_cap_percent, 0);
       if (sum !== 10000) {
-        setFormError(t('errorRatioSumMismatch', { current: sum }));
+        setFormError(t('errorRuleSumMismatch', { current: sum }));
         return;
       }
       const dur = Number(roundDuration) || config?.roundDuration || 0;
@@ -203,9 +241,9 @@ function ConfigSection() {
         setFormError(t('errorNoRoundDuration'));
         return;
       }
-      setPoolRewardConfig.mutate([entityId, ratios, dur]);
+      setPoolRewardConfig.mutate([entityId, levelRules, dur]);
     },
-    [entityId, localRatios, roundDuration, config, setPoolRewardConfig, t],
+    [entityId, localRules, roundDuration, config, setPoolRewardConfig, t, isLocked],
   );
 
   // ── Pause/Resume toggle ──────────────────────────────────
@@ -250,9 +288,14 @@ function ConfigSection() {
             <Badge variant={statusVariant}>{statusLabel}</Badge>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('levelRatios')}</p>
+            <p className="text-xs text-muted-foreground">{t('levelRules')}</p>
             <p className="font-mono text-sm font-medium">
-              {config?.levelRatios?.map(([l, r]) => `Lv${l}${levelNameById[l] ? ` ${levelNameById[l]}` : ''}: ${bpsToPercent(r)}`).join(', ') || '-'}
+              {config?.levelRules?.map(([l, rule]) => {
+                const behavior = rule.capBehavior.type === 'UnlockByTeam'
+                  ? `UnlockByTeam +${bpsToPercent(rule.capBehavior.unlockPercent)}`
+                  : 'Fixed';
+                return `Lv${l}${levelNameById[l] ? ` ${levelNameById[l]}` : ''}: ${bpsToPercent(rule.baseCapPercent)} (${behavior})`;
+              }).join(', ') || '-'}
             </p>
           </div>
           <div className="space-y-1">
@@ -289,9 +332,9 @@ function ConfigSection() {
           <Separator className="my-4" />
 
           <form onSubmit={handleSaveConfig} className="space-y-4">
-            {/* ── Level ratios (all rows always editable) ── */}
+            {/* ── Level rules (Fixed cap only for now) ── */}
             <div className="space-y-3">
-              <LabelWithTip tip={t('help.levelRatios')}>{t('levelRatios')}</LabelWithTip>
+              <LabelWithTip tip={t('help.levelRules')}>{t('levelRules')}</LabelWithTip>
 
               {customLevels.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('noLevelsConfigured')}</p>
@@ -302,12 +345,13 @@ function ConfigSection() {
                       <thead>
                         <tr className="border-b bg-muted/30">
                           <th className="px-3 py-2 text-left font-medium">{t('levelId')}</th>
-                          <th className="px-3 py-2 text-right font-medium">{t('ratio')} (bps)</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('baseCapPercent')} (bps)</th>
+                          <th className="px-3 py-2 text-left font-medium">{t('capBehavior')}</th>
                           <th className="px-3 py-2 text-right font-medium">{t('actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {localRatios.map((row, index) => {
+                        {localRules.map((row, index) => {
                           const available = getAvailableLevels(row.levelId);
                           return (
                             <tr key={index} className="border-b last:border-0">
@@ -333,11 +377,31 @@ function ConfigSection() {
                                   type="number"
                                   min={1}
                                   max={10000}
-                                  value={row.ratio}
-                                  onChange={(e) => handleRowChange(index, 'ratio', e.target.value)}
+                                  value={row.baseCapPercent}
+                                  onChange={(e) => handleRowChange(index, 'baseCapPercent', e.target.value)}
                                   placeholder="500"
                                   className="h-8 w-24 ml-auto text-right"
                                 />
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="space-y-2">
+                                  <Select value={row.behaviorType} onValueChange={(v) => handleRowChange(index, 'behaviorType', v)}>
+                                    <SelectTrigger className="h-8 w-[180px]">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Fixed">{t('capBehaviorFixed')}</SelectItem>
+                                      <SelectItem value="UnlockByTeam">{t('capBehaviorUnlockByTeam')}</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  {row.behaviorType === 'UnlockByTeam' && (
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <Input type="number" min={0} placeholder={t('directPerUnlock')} value={row.directPerUnlock} onChange={(e) => handleRowChange(index, 'directPerUnlock', e.target.value)} />
+                                      <Input type="number" min={0} placeholder={t('teamPerUnlock')} value={row.teamPerUnlock} onChange={(e) => handleRowChange(index, 'teamPerUnlock', e.target.value)} />
+                                      <Input type="number" min={0} max={10000} placeholder={t('unlockPercent')} value={row.unlockPercent} onChange={(e) => handleRowChange(index, 'unlockPercent', e.target.value)} />
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-3 py-2 text-right">
                                 <Button
@@ -345,7 +409,7 @@ function ConfigSection() {
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleDeleteRow(index)}
-                                  disabled={localRatios.length <= 1}
+                                  disabled={localRules.length <= 1}
                                   className="text-destructive hover:text-destructive"
                                 >
                                   {t('deleteRow')}
@@ -358,22 +422,22 @@ function ConfigSection() {
                     </table>
                   </div>
 
-                  {/* Add button + ratio sum */}
+                  {/* Add button + baseCapPercent sum */}
                   <div className="flex items-center gap-3">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={handleAddRow}
-                      disabled={localRatios.length >= customLevels.length}
+                      disabled={localRules.length >= customLevels.length}
                     >
-                      {t('addLevelRatio')}
+                      {t('addLevelRule')}
                     </Button>
                     {(() => {
-                      const ok = ratioSum === 10000;
+                      const ok = ruleSum === 10000;
                       return (
                         <span className={`text-xs font-mono ${ok ? 'text-green-600' : 'text-orange-500'}`}>
-                          {t('ratioSum')}: {ratioSum} / 10000 bps {ok ? '✓' : ''}
+                          {t('ruleSum')}: {ruleSum} / 10000 bps {ok ? '✓' : ''}
                         </span>
                       );
                     })()}
@@ -441,9 +505,8 @@ function RoundInfoSection() {
   const { currentRound, lastRoundId, config, poolBalance } = usePoolRewardCommission();
   const currentBlock = useCurrentBlock();
 
-  const endBlock = currentRound && config
-    ? currentRound.startBlock + config.roundDuration
-    : 0;
+  const endBlock = currentRound?.endBlock
+    ?? (currentRound && config ? currentRound.startBlock + config.roundDuration : 0);
   const remaining = endBlock > currentBlock ? endBlock - currentBlock : 0;
 
   return (
@@ -488,7 +551,7 @@ function RoundInfoSection() {
             <div>
               <h3 className="mb-2 text-sm font-semibold">{t('levelSnapshotsTitle')}</h3>
               <p className="mb-3 text-xs text-muted-foreground">{t('levelSnapshotsDesc')}</p>
-              <LevelSnapshotTable snapshots={currentRound.levelSnapshots} unit="NEX" />
+              <LevelSnapshotTable snapshots={currentRound.levelSnapshots} unit="NEX" perMemberReward={currentRound.perMemberReward} />
             </div>
           </>
         )}
@@ -499,7 +562,7 @@ function RoundInfoSection() {
             <Separator />
             <div>
               <h3 className="mb-2 text-sm font-semibold">{t('levelSnapshotsTitle')} (Token)</h3>
-              <LevelSnapshotTable snapshots={currentRound.tokenLevelSnapshots} unit="Token" />
+              <LevelSnapshotTable snapshots={currentRound.tokenLevelSnapshots} unit="Token" perMemberReward={currentRound.tokenPerMemberReward} />
             </div>
           </>
         )}
@@ -508,7 +571,7 @@ function RoundInfoSection() {
   );
 }
 
-function LevelSnapshotTable({ snapshots, unit }: { snapshots: LevelSnapshot[]; unit: string }) {
+function LevelSnapshotTable({ snapshots, unit, perMemberReward }: { snapshots: LevelSnapshot[]; unit: string; perMemberReward?: bigint | null }) {
   const t = useTranslations('poolReward');
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -533,7 +596,7 @@ function LevelSnapshotTable({ snapshots, unit }: { snapshots: LevelSnapshot[]; u
                 </td>
                 <td className="px-3 py-2 text-right font-mono">{snap.memberCount}</td>
                 <td className="px-3 py-2 text-right font-mono font-medium">
-                  {formatNex(snap.perMemberReward)} {unit}
+                  {formatNex(perMemberReward ?? BigInt(0))} {unit}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center justify-end gap-2">
@@ -613,8 +676,8 @@ function MyParticipationSection() {
   const lastClaimedRound = lastClaimed ?? 0;
 
   // Find user's effective level and claimable reward from snapshot
-  const userReward = findUserReward(currentRound?.levelSnapshots ?? [], config?.levelRatios ?? []);
-  const userTokenReward = findUserReward(currentRound?.tokenLevelSnapshots ?? [], config?.levelRatios ?? []);
+  const userReward = findUserReward(currentRound?.levelSnapshots ?? []);
+  const userTokenReward = findUserReward(currentRound?.tokenLevelSnapshots ?? []);
 
   const canClaim =
     !!address &&
@@ -720,17 +783,11 @@ function MyParticipationSection() {
 /** Find the first matching level snapshot (simplistic: use first available level) */
 function findUserReward(
   snapshots: LevelSnapshot[],
-  _levelRatios: [number, number][],
 ): { perMemberReward: bigint; levelId: number } {
-  // Without runtime API call, we can't determine the user's effective level client-side.
-  // We display all levels in the table; the user knows their level.
-  // For the summary card, pick the first non-zero snapshot as an indicator,
-  // or return zero if empty (user must check the level table).
   if (snapshots.length === 0) return { perMemberReward: BigInt(0), levelId: 0 };
-  // Show the lowest level's reward as a baseline indicator
   const first = snapshots[0];
   return {
-    perMemberReward: first?.perMemberReward ?? BigInt(0),
+    perMemberReward: BigInt(0),
     levelId: first?.levelId ?? 0,
   };
 }

@@ -180,6 +180,8 @@ function SellerOrderCard({ order, shopId, currentBlock }: { order: OrderData; sh
           <div className="space-y-1 text-sm text-muted-foreground">
             <p>买家: {order.buyer.slice(0, 8)}...{order.buyer.slice(-6)}</p>
             <p>金额: {formatNexBalance(order.totalAmount)} {order.paymentAsset === PaymentAsset.Native ? 'NEX' : 'Entity Token'}</p>
+            {order.shoppingBalanceUsed > BigInt(0) && <p>购物余额支付: {formatNexBalance(order.shoppingBalanceUsed)} NEX</p>}
+            {order.tokenDiscountTokensBurned > BigInt(0) && <p>折扣代币燃烧: {formatNexBalance(order.tokenDiscountTokensBurned)} Token</p>}
             {order.escrowId != null && <p>托管 ID: {order.escrowId}</p>}
             {isServiceLike && derivedStage && <p>服务阶段: {t(`orders.${derivedStage}`)}</p>}
           </div>

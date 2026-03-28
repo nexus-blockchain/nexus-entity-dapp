@@ -53,23 +53,23 @@ function MultiLevelSkeleton() {
 
 // ─── Config + Tiers Section (combined) ──────────────────────
 
-interface DraftTier {
+type DraftTier = {
   rate: string;
-  directMin: string;
-  teamMin: string;
-  spentMin: string;
-  levelMin: string;
-}
+  requiredDirects: string;
+  requiredTeamSize: string;
+  requiredSpent: string;
+  requiredLevelId: string;
+};
 
-const emptyDraft = (): DraftTier => ({ rate: '', directMin: '', teamMin: '', spentMin: '', levelMin: '0' });
+const emptyDraft = (): DraftTier => ({ rate: '', requiredDirects: '', requiredTeamSize: '', requiredSpent: '', requiredLevelId: '0' });
 
-function tierToParams(t: { rate: number; directMin: number; teamMin: number; spentMin: bigint | string; levelMin: number }) {
+function tierToParams(t: { rate: number; requiredDirects: number; requiredTeamSize: number; requiredSpent: bigint | string; requiredLevelId: number }) {
   return {
     rate: t.rate,
-    direct_min: t.directMin,
-    team_min: t.teamMin,
-    spent_min: t.spentMin.toString(),
-    level_min: t.levelMin,
+    required_directs: t.requiredDirects,
+    required_team_size: t.requiredTeamSize,
+    required_spent: t.requiredSpent.toString(),
+    required_level_id: t.requiredLevelId,
   };
 }
 
@@ -85,9 +85,6 @@ function ConfigAndTiersSection() {
   // Unified busy state: block all buttons when ANY mutation is in flight
   const isAnyBusy = isTxBusy(setMultiLevelConfig) || isTxBusy(clearMultiLevelConfig) || isTxBusy(addTier) || isTxBusy(removeTier) || isTxBusy(updateMultiLevelParams);
 
-  const [maxLevelsDeep, setMaxLevelsDeep] = useState('');
-
-  // For init mode: accumulate tiers locally before first save
   const [draftTiers, setDraftTiers] = useState<DraftTier[]>([emptyDraft()]);
 
   // For existing config: inline edit tier
@@ -98,7 +95,7 @@ function ConfigAndTiersSection() {
   const [newTier, setNewTier] = useState<DraftTier>(emptyDraft());
   const [newIndex, setNewIndex] = useState('');
 
-  const tiers = config?.tiers ?? [];
+  const levels = config?.levels ?? [];
   const isInit = !config;
 
   // ── Init mode: add/remove draft rows ──
@@ -110,15 +107,15 @@ function ConfigAndTiersSection() {
 
   // ── Start inline edit for an existing tier ──
   const handleStartEdit = (index: number) => {
-    const tier = tiers[index];
+    const tier = levels[index];
     if (!tier) return;
     setEditingIndex(index);
     setEditDraft({
       rate: String(tier.rate),
-      directMin: String(tier.directMin),
-      teamMin: String(tier.teamMin),
-      spentMin: tier.spentMin.toString(),
-      levelMin: String(tier.levelMin),
+      requiredDirects: String(tier.requiredDirects),
+      requiredTeamSize: String(tier.requiredTeamSize),
+      requiredSpent: tier.requiredSpent.toString(),
+      requiredLevelId: String(tier.requiredLevelId),
     });
   };
   const handleCancelEdit = () => { setEditingIndex(null); setEditDraft(emptyDraft()); };
@@ -129,14 +126,13 @@ function ConfigAndTiersSection() {
       if (editingIndex === null || isAnyBusy) return;
       updateMultiLevelParams.mutate([
         entityId,
-        null, // maxLevelsDeep: no change
         editingIndex,
         {
           rate: Number(editDraft.rate) || 0,
-          directMin: Number(editDraft.directMin) || 0,
-          teamMin: Number(editDraft.teamMin) || 0,
-          spentMin: editDraft.spentMin.trim() || '0',
-          levelMin: Number(editDraft.levelMin) || 0,
+          required_directs: Number(editDraft.requiredDirects) || 0,
+          required_team_size: Number(editDraft.requiredTeamSize) || 0,
+          required_spent: editDraft.requiredSpent.trim() || '0',
+          required_level_id: Number(editDraft.requiredLevelId) || 0,
         },
       ]);
       setEditingIndex(null);
@@ -154,33 +150,26 @@ function ConfigAndTiersSection() {
         .filter((d) => d.rate.trim())
         .map((d) => ({
           rate: Number(d.rate) || 0,
-          directMin: Number(d.directMin) || 0,
-          teamMin: Number(d.teamMin) || 0,
-          spentMin: d.spentMin.trim() || '0',
-          levelMin: Number(d.levelMin) || 0,
+          required_directs: Number(d.requiredDirects) || 0,
+          required_team_size: Number(d.requiredTeamSize) || 0,
+          required_spent: d.requiredSpent.trim() || '0',
+          required_level_id: Number(d.requiredLevelId) || 0,
         }));
       if (levels.length === 0) return;
       setMultiLevelConfig.mutate([
         entityId,
         levels,
-        Number(maxLevelsDeep) || 10000,
       ]);
     },
-    [entityId, maxLevelsDeep, draftTiers, setMultiLevelConfig],
+    [entityId, draftTiers, setMultiLevelConfig, isAnyBusy],
   );
 
-  // ── Update maxLevelsDeep only (config exists) ──
+  // ── Add single tier (config exists) ──
   const handleUpdateConfig = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (!config || isAnyBusy) return;
-      setMultiLevelConfig.mutate([
-        entityId,
-        config.tiers.map(tierToParams),
-        Number(maxLevelsDeep) || config.maxLevelsDeep,
-      ]);
     },
-    [entityId, maxLevelsDeep, config, setMultiLevelConfig],
+    [],
   );
 
   // ── Add single tier (config exists) ──
@@ -189,22 +178,22 @@ function ConfigAndTiersSection() {
       e.preventDefault();
       if (isAnyBusy) return;
       if (!newTier.rate.trim()) return;
-      const index = newIndex.trim() ? Number(newIndex) : tiers.length;
+      const index = newIndex.trim() ? Number(newIndex) : levels.length;
       addTier.mutate([
         entityId,
         index,
         {
           rate: Number(newTier.rate),
-          directMin: Number(newTier.directMin) || 0,
-          teamMin: Number(newTier.teamMin) || 0,
-          spentMin: newTier.spentMin.trim() || '0',
-          levelMin: Number(newTier.levelMin) || 0,
+          required_directs: Number(newTier.requiredDirects) || 0,
+          required_team_size: Number(newTier.requiredTeamSize) || 0,
+          required_spent: newTier.requiredSpent.trim() || '0',
+          required_level_id: Number(newTier.requiredLevelId) || 0,
         },
       ]);
       setNewTier(emptyDraft());
       setNewIndex('');
     },
-    [entityId, newTier, newIndex, tiers.length, addTier],
+    [entityId, newTier, newIndex, levels.length, addTier, isAnyBusy],
   );
 
   const handleClear = useCallback(() => {
@@ -225,22 +214,6 @@ function ConfigAndTiersSection() {
             <p className="text-sm text-muted-foreground">{t('noConfig')}</p>
           }>
             <form onSubmit={handleInitSave} className="space-y-4">
-              {/* Max total rate */}
-              <div className="space-y-2">
-                <LabelWithTip htmlFor="ml-max-total-rate" tip={t('help.maxLevelsDeep')}>{t('maxLevelsDeep')}</LabelWithTip>
-                <Input
-                  id="ml-max-total-rate"
-                  type="number"
-                  value={maxLevelsDeep}
-                  onChange={(e) => setMaxLevelsDeep(e.target.value)}
-                  placeholder="10000"
-                  className="w-48"
-                />
-                <p className="text-xs text-muted-foreground">{t('maxLevelsDeepDesc')}</p>
-              </div>
-
-              <Separator />
-
               {/* Draft tiers */}
               <div className="space-y-3">
                 <p className="text-sm font-medium">{t('tiersSection')}</p>
@@ -262,39 +235,39 @@ function ConfigAndTiersSection() {
                       />
                     </div>
                     <div className="space-y-1">
-                      {i === 0 && <p className="text-xs text-muted-foreground">{t('directMin')}</p>}
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredDirects')}</p>}
                       <Input
                         type="number"
-                        value={draft.directMin}
-                        onChange={(e) => handleDraftChange(i, 'directMin', e.target.value)}
+                        value={draft.requiredDirects}
+                        onChange={(e) => handleDraftChange(i, 'requiredDirects', e.target.value)}
                         placeholder="0"
                         className="w-24"
                       />
                     </div>
                     <div className="space-y-1">
-                      {i === 0 && <p className="text-xs text-muted-foreground">{t('teamMin')}</p>}
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredTeamSize')}</p>}
                       <Input
                         type="number"
-                        value={draft.teamMin}
-                        onChange={(e) => handleDraftChange(i, 'teamMin', e.target.value)}
+                        value={draft.requiredTeamSize}
+                        onChange={(e) => handleDraftChange(i, 'requiredTeamSize', e.target.value)}
                         placeholder="0"
                         className="w-24"
                       />
                     </div>
                     <div className="space-y-1">
-                      {i === 0 && <p className="text-xs text-muted-foreground">{t('spentMin')}</p>}
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredSpent')}</p>}
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={draft.spentMin}
-                        onChange={(e) => handleDraftChange(i, 'spentMin', e.target.value)}
+                        value={draft.requiredSpent}
+                        onChange={(e) => handleDraftChange(i, 'requiredSpent', e.target.value)}
                         placeholder="0"
                         className="w-28"
                       />
                     </div>
                     <div className="space-y-1">
-                      {i === 0 && <p className="text-xs text-muted-foreground">{t('levelMin')}</p>}
-                      <Select value={draft.levelMin} onValueChange={(v) => handleDraftChange(i, 'levelMin', v)}>
+                      {i === 0 && <p className="text-xs text-muted-foreground">{t('requiredLevelId')}</p>}
+                      <Select value={draft.requiredLevelId} onValueChange={(v) => handleDraftChange(i, 'requiredLevelId', v)}>
                         <SelectTrigger className="w-32">
                           <SelectValue />
                         </SelectTrigger>
@@ -344,40 +317,19 @@ function ConfigAndTiersSection() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t('maxLevelsDeep')}</p>
-              <p className="text-sm font-medium">{config.maxLevelsDeep} {t('bps')}</p>
-            </div>
-            <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t('tierCount')}</p>
-              <p className="text-sm font-medium">{config.tiers.length}</p>
+              <p className="text-sm font-medium">{config.levels.length}</p>
             </div>
           </div>
 
           <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
             <Separator className="my-4" />
-            <form onSubmit={handleUpdateConfig} className="space-y-4">
-              <div className="space-y-2">
-                <LabelWithTip htmlFor="ml-max-total-rate" tip={t('help.maxLevelsDeep')}>{t('maxLevelsDeep')}</LabelWithTip>
-                <Input
-                  id="ml-max-total-rate"
-                  type="number"
-                  value={maxLevelsDeep}
-                  onChange={(e) => setMaxLevelsDeep(e.target.value)}
-                  placeholder={String(config.maxLevelsDeep)}
-                  className="w-48"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <Button type="submit" disabled={isAnyBusy}>
-                  {t('saveConfig')}
-                </Button>
-                <Button type="button" variant="destructive" onClick={handleClear} disabled={isAnyBusy}>
-                  {t('clearConfig')}
-                </Button>
-                <TxStatusIndicator txState={setMultiLevelConfig.txState} />
-                <TxStatusIndicator txState={clearMultiLevelConfig.txState} />
-              </div>
-            </form>
+            <div className="flex items-center gap-3">
+              <Button type="button" variant="destructive" onClick={handleClear} disabled={isAnyBusy}>
+                {t('clearConfig')}
+              </Button>
+              <TxStatusIndicator txState={clearMultiLevelConfig.txState} />
+            </div>
           </PermissionGuard>
         </CardContent>
       </Card>
@@ -389,7 +341,7 @@ function ConfigAndTiersSection() {
           <CardDescription>{t('tiersSectionDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {tiers.length === 0 ? (
+          {levels.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">{t('noTiers')}</p>
           ) : (
             <Table>
@@ -397,17 +349,17 @@ function ConfigAndTiersSection() {
                 <TableRow>
                   <TableHead>{t('tierIndex')}</TableHead>
                   <TableHead>{t('rate')}</TableHead>
-                  <TableHead>{t('directMin')}</TableHead>
-                  <TableHead>{t('teamMin')}</TableHead>
-                  <TableHead>{t('spentMin')}</TableHead>
-                  <TableHead>{t('levelMin')}</TableHead>
+                  <TableHead>{t('requiredDirects')}</TableHead>
+                  <TableHead>{t('requiredTeamSize')}</TableHead>
+                  <TableHead>{t('requiredSpent')}</TableHead>
+                  <TableHead>{t('requiredLevelId')}</TableHead>
                   <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
                     <TableHead className="w-[120px]" />
                   </PermissionGuard>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tiers.map((tier, i) => (
+                {levels.map((tier, i) => (
                   <TableRow key={i}>
                     <TableCell className="font-medium">L{i}</TableCell>
                     {editingIndex === i ? (
@@ -416,16 +368,16 @@ function ConfigAndTiersSection() {
                           <Input type="number" value={editDraft.rate} onChange={(e) => setEditDraft((p) => ({ ...p, rate: e.target.value }))} className="w-24" />
                         </TableCell>
                         <TableCell>
-                          <Input type="number" value={editDraft.directMin} onChange={(e) => setEditDraft((p) => ({ ...p, directMin: e.target.value }))} placeholder="0" className="w-20" />
+                          <Input type="number" value={editDraft.requiredDirects} onChange={(e) => setEditDraft((p) => ({ ...p, requiredDirects: e.target.value }))} placeholder="0" className="w-20" />
                         </TableCell>
                         <TableCell>
-                          <Input type="number" value={editDraft.teamMin} onChange={(e) => setEditDraft((p) => ({ ...p, teamMin: e.target.value }))} placeholder="0" className="w-20" />
+                          <Input type="number" value={editDraft.requiredTeamSize} onChange={(e) => setEditDraft((p) => ({ ...p, requiredTeamSize: e.target.value }))} placeholder="0" className="w-20" />
                         </TableCell>
                         <TableCell>
-                          <Input type="text" inputMode="decimal" value={editDraft.spentMin} onChange={(e) => setEditDraft((p) => ({ ...p, spentMin: e.target.value }))} placeholder="0" className="w-28" />
+                          <Input type="text" inputMode="decimal" value={editDraft.requiredSpent} onChange={(e) => setEditDraft((p) => ({ ...p, requiredSpent: e.target.value }))} placeholder="0" className="w-28" />
                         </TableCell>
                         <TableCell>
-                          <Select value={editDraft.levelMin} onValueChange={(v) => setEditDraft((p) => ({ ...p, levelMin: v }))}>
+                          <Select value={editDraft.requiredLevelId} onValueChange={(v) => setEditDraft((p) => ({ ...p, requiredLevelId: v }))}>
                             <SelectTrigger className="w-32">
                               <SelectValue />
                             </SelectTrigger>
@@ -462,13 +414,13 @@ function ConfigAndTiersSection() {
                     ) : (
                       <>
                         <TableCell>{tier.rate} {t('bps')}</TableCell>
-                        <TableCell>{tier.directMin}</TableCell>
-                        <TableCell>{tier.teamMin}</TableCell>
-                        <TableCell>{formatNex(tier.spentMin)} USDT</TableCell>
+                        <TableCell>{tier.requiredDirects}</TableCell>
+                        <TableCell>{tier.requiredTeamSize}</TableCell>
+                        <TableCell>{formatNex(tier.requiredSpent)} USDT</TableCell>
                         <TableCell>
-                          {tier.levelMin === 0
+                          {tier.requiredLevelId === 0
                             ? t('anyLevel')
-                            : (customLevels.find((lv) => lv.id === tier.levelMin)?.name || `#${tier.levelMin}`)}
+                            : (customLevels.find((lv) => lv.id === tier.requiredLevelId)?.name || `#${tier.requiredLevelId}`)}
                         </TableCell>
                         <PermissionGuard required={AdminPermission.COMMISSION_MANAGE} fallback={null}>
                           <TableCell>
@@ -511,7 +463,7 @@ function ConfigAndTiersSection() {
                     type="number"
                     value={newIndex}
                     onChange={(e) => setNewIndex(e.target.value)}
-                    placeholder={String(tiers.length)}
+                    placeholder={String(levels.length)}
                     className="w-20"
                   />
                 </div>
@@ -525,11 +477,11 @@ function ConfigAndTiersSection() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <LabelWithTip tip={t('help.directMin')}>{t('directMin')}</LabelWithTip>
+                  <LabelWithTip tip={t('help.requiredDirects')}>{t('requiredDirects')}</LabelWithTip>
                   <Input
                     type="number"
-                    value={newTier.directMin}
-                    onChange={(e) => setNewTier((p) => ({ ...p, directMin: e.target.value }))}
+                    value={newTier.requiredDirects}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredDirects: e.target.value }))}
                     placeholder="0"
                     className="w-28"
                   />
@@ -537,29 +489,29 @@ function ConfigAndTiersSection() {
               </div>
               <div className="flex items-end gap-3 flex-wrap">
                 <div className="space-y-2">
-                  <LabelWithTip tip={t('help.teamMin')}>{t('teamMin')}</LabelWithTip>
+                  <LabelWithTip tip={t('help.requiredTeamSize')}>{t('requiredTeamSize')}</LabelWithTip>
                   <Input
                     type="number"
-                    value={newTier.teamMin}
-                    onChange={(e) => setNewTier((p) => ({ ...p, teamMin: e.target.value }))}
+                    value={newTier.requiredTeamSize}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredTeamSize: e.target.value }))}
                     placeholder="0"
                     className="w-28"
                   />
                 </div>
                 <div className="space-y-2">
-                  <LabelWithTip tip={t('help.spentMin')}>{t('spentMin')}</LabelWithTip>
+                  <LabelWithTip tip={t('help.requiredSpent')}>{t('requiredSpent')}</LabelWithTip>
                   <Input
                     type="text"
                     inputMode="decimal"
-                    value={newTier.spentMin}
-                    onChange={(e) => setNewTier((p) => ({ ...p, spentMin: e.target.value }))}
+                    value={newTier.requiredSpent}
+                    onChange={(e) => setNewTier((p) => ({ ...p, requiredSpent: e.target.value }))}
                     placeholder="0"
                     className="w-36"
                   />
                 </div>
                 <div className="space-y-2">
-                  <LabelWithTip tip={t('help.levelMin')}>{t('levelMin')}</LabelWithTip>
-                  <Select value={newTier.levelMin} onValueChange={(v) => setNewTier((p) => ({ ...p, levelMin: v }))}>
+                  <LabelWithTip tip={t('help.requiredLevelId')}>{t('requiredLevelId')}</LabelWithTip>
+                  <Select value={newTier.requiredLevelId} onValueChange={(v) => setNewTier((p) => ({ ...p, requiredLevelId: v }))}>
                     <SelectTrigger className="w-36">
                       <SelectValue />
                     </SelectTrigger>
@@ -604,8 +556,8 @@ function StatsSection() {
         <div className="grid grid-cols-3 gap-4">
           <Card className="shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">{t('totalOrders')}</p>
-              <p className="text-lg font-semibold">{stats?.totalOrders ?? 0}</p>
+              <p className="text-xs text-muted-foreground">{t('orderCount')}</p>
+              <p className="text-lg font-semibold">{stats?.orderCount ?? 0}</p>
             </CardContent>
           </Card>
           <Card className="shadow-none">

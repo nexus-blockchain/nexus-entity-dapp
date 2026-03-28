@@ -368,7 +368,7 @@ function OrderDetailRow({ order, currentBlock }: { order: OrderData; currentBloc
               </p>
               <p>
                 <span className="text-muted-foreground">{t('payer')}: </span>
-                <CopyableAddress address={order.payer} textClassName="text-xs" />
+                {order.payer ? <CopyableAddress address={order.payer} textClassName="text-xs" /> : '-'}
               </p>
               <p>
                 <span className="text-muted-foreground">{t('unitPrice')}: </span>
@@ -378,6 +378,18 @@ function OrderDetailRow({ order, currentBlock }: { order: OrderData; currentBloc
                 <span className="text-muted-foreground">{t('platformFee')}: </span>
                 {formatNex(order.platformFee)} NEX
               </p>
+              {order.shoppingBalanceUsed > BigInt(0) && (
+                <p>
+                  <span className="text-muted-foreground">{t('shoppingBalanceUsed')}: </span>
+                  {formatNex(order.shoppingBalanceUsed)} NEX
+                </p>
+              )}
+              {order.tokenDiscountTokensBurned > BigInt(0) && (
+                <p>
+                  <span className="text-muted-foreground">{t('tokenDiscountTokensBurned')}: </span>
+                  {formatNex(order.tokenDiscountTokensBurned)} Token
+                </p>
+              )}
               <p>
                 <span className="text-muted-foreground">{t('category')}: </span>
                 {te(`productCategory.${order.productCategory}`)}

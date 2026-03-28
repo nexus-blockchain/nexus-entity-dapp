@@ -4,38 +4,22 @@ import { useEntityQuery, hasPallet } from './use-entity-query';
 import { useEntityMutation } from './use-entity-mutation';
 import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { STALE_TIMES } from '@/lib/chain/constants';
-import type { SingleLineConfig, LevelBasedLevels } from '@/lib/types/models';
-
-// ─── Parsers ────────────────────────────────────────────────
-
-function parseSingleLineConfig(raw: unknown): SingleLineConfig | null {
-  if (!raw || (raw as { isNone?: boolean }).isNone) return null;
-  const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
-  if (!unwrapped) return null;
-  const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  return {
-    enabled: true, // placeholder; actual value is read from SingleLineEnabled storage separately
-    uplineRate: Number(obj.uplineRate ?? obj.upline_rate ?? 0),
-    downlineRate: Number(obj.downlineRate ?? obj.downline_rate ?? 0),
-    baseUplineLevels: Number(obj.baseUplineLevels ?? obj.base_upline_levels ?? 0),
-    baseDownlineLevels: Number(obj.baseDownlineLevels ?? obj.base_downline_levels ?? 0),
-    levelIncrementThreshold: BigInt(String(obj.levelIncrementThreshold ?? obj.level_increment_threshold ?? 0)),
-    maxUplineLevels: Number(obj.maxUplineLevels ?? obj.max_upline_levels ?? 0),
-    maxDownlineLevels: Number(obj.maxDownlineLevels ?? obj.max_downline_levels ?? 0),
-  };
-}
-
-function parseLevelBasedLevels(levelId: number, raw: unknown): LevelBasedLevels | null {
-  if (!raw || (raw as { isNone?: boolean }).isNone) return null;
-  const unwrapped = (raw as { unwrapOr?: (d: null) => unknown }).unwrapOr?.(null) ?? raw;
-  if (!unwrapped) return null;
-  const obj = (unwrapped as any).toJSON?.() ?? unwrapped;
-  return {
-    levelId,
-    uplineLevels: Number(obj.uplineLevels ?? obj.upline_levels ?? 0),
-    downlineLevels: Number(obj.downlineLevels ?? obj.downline_levels ?? 0),
-  };
-}
+import {
+  parseLevelBasedLevels,
+  parseSingleLineConfig,
+  parseSingleLineMemberView,
+  parseSingleLinePosition,
+  parseSingleLinePreview,
+  parseSingleLineStats,
+} from '@/lib/chain/adapters/single-line-parsers';
+import type {
+  SingleLineConfig,
+  LevelBasedLevels,
+  SingleLinePosition,
+  SingleLineStats,
+  SingleLineMemberViewData,
+  SingleLinePreviewData,
+} from '@/lib/types/models';
 
 // ─── Hook ───────────────────────────────────────────────────
 
@@ -58,7 +42,6 @@ export function useSingleLineCommission() {
       const raw = await fn(entityId);
       const config = parseSingleLineConfig(raw);
       if (!config) return null;
-      // enabled is a separate storage item (SingleLineEnabled), not part of SingleLineConfig struct
       const enabledFn = (api.query as any)[PALLET].singleLineEnabled;
       if (enabledFn) {
         const enabledRaw = await enabledFn(entityId);
@@ -68,6 +51,56 @@ export function useSingleLineCommission() {
     },
     { staleTime: STALE_TIMES.members },
   );
+
+  const statsQuery = useEntityQuery<SingleLineStats | null>(
+    ['entity', entityId, 'singleLine', 'overview'],
+    async (api) => {
+      const fn = (api.call as any)?.singleLineQueryApi?.singleLineOverview;
+      if (!fn) return null;
+      const raw = await fn(entityId);
+      return parseSingleLineStats(raw);
+    },
+    { staleTime: STALE_TIMES.members },
+  );
+
+  const useLinePosition = (account: string | null) =>
+    useEntityQuery<SingleLinePosition | null>(
+      ['entity', entityId, 'singleLine', 'position', account],
+      async (api) => {
+        if (!account) return null;
+        const fn = (api.call as any)?.singleLineQueryApi?.singleLineMemberPosition;
+        if (!fn) return null;
+        const raw = await fn(entityId, account);
+        return parseSingleLinePosition(raw);
+      },
+      { staleTime: STALE_TIMES.members, enabled: !!account },
+    );
+
+  const useMemberView = (account: string | null) =>
+    useEntityQuery<SingleLineMemberViewData | null>(
+      ['entity', entityId, 'singleLine', 'memberView', account],
+      async (api) => {
+        if (!account) return null;
+        const fn = (api.call as any)?.singleLineQueryApi?.singleLineMemberView;
+        if (!fn) return null;
+        const raw = await fn(entityId, account);
+        return parseSingleLineMemberView(raw);
+      },
+      { staleTime: STALE_TIMES.members, enabled: !!account },
+    );
+
+  const usePreview = (buyer: string | null, orderAmount: bigint | number | null) =>
+    useEntityQuery<SingleLinePreviewData[]>(
+      ['entity', entityId, 'singleLine', 'preview', buyer, String(orderAmount ?? '')],
+      async (api) => {
+        if (!buyer || orderAmount == null) return [];
+        const fn = (api.call as any)?.singleLineQueryApi?.singleLinePreviewCommission;
+        if (!fn) return [];
+        const raw = await fn(entityId, buyer, orderAmount.toString());
+        return parseSingleLinePreview(raw);
+      },
+      { staleTime: STALE_TIMES.members, enabled: !!buyer && orderAmount != null },
+    );
 
   const useLevelOverrides = (maxLevelId: number) =>
     useEntityQuery<LevelBasedLevels[]>(
@@ -97,10 +130,12 @@ export function useSingleLineCommission() {
 
   return {
     config: configQuery.data ?? null,
-    stats: null,
-    isLoading: configQuery.isLoading,
-    error: configQuery.error,
-    useLinePosition: (_account: string | null) => ({ data: null, isLoading: false, error: null }),
+    stats: statsQuery.data ?? null,
+    isLoading: configQuery.isLoading || statsQuery.isLoading,
+    error: configQuery.error ?? statsQuery.error,
+    useLinePosition,
+    useMemberView,
+    usePreview,
     useLevelOverrides,
     configureSingleLine,
     updateParams,

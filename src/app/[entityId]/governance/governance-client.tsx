@@ -110,7 +110,6 @@ const PROPOSAL_TYPES_KEYS: Record<string, { types: Record<string, ProposalTypeIn
     types: {
       MemberPolicyChange: { fields: { policy: 'u8' } },
       UpgradeRuleToggle: { fields: { enabled: 'bool' } },
-      MemberStatsPolicyChange: { fields: { qualified_only: 'bool', subtract_on_removal: 'bool' } },
       AddCustomLevel: { fields: { level_id: 'u8', name: 'BoundedVec', threshold: 'Balance', discount_rate: 'u16', commission_bonus: 'u16' } },
       UpdateCustomLevel: { fields: { level_id: 'u8', name: 'Option<BoundedVec>', threshold: 'Option<Balance>', discount_rate: 'Option<u16>', commission_bonus: 'Option<u16>' } },
       RemoveCustomLevel: { fields: { level_id: 'u8' } },
@@ -134,8 +133,8 @@ const PROPOSAL_TYPES_KEYS: Record<string, { types: Record<string, ProposalTypeIn
       TokenWithdrawalConfigChange: { fields: { enabled: 'bool' } },
       WithdrawalPauseToggle: { fields: { paused: 'bool' } },
       ReferrerGuardChange: { fields: { min_referrer_spent: 'Balance', min_referrer_orders: 'u32' } },
+      ReferrerExemptThresholdChange: { fields: { threshold: 'Balance' } },
       CommissionCapChange: { fields: { max_per_order: 'Balance', max_total_earned: 'Balance' } },
-      ReferralValidityChange: { fields: { validity_blocks: 'u32', valid_orders: 'u32' } },
       MultiLevelPause: { fields: {} },
       MultiLevelResume: { fields: {} },
       SingleLineConfigChange: { fields: { upline_rate: 'u16', downline_rate: 'u16', base_upline_levels: 'u8', base_downline_levels: 'u8', max_upline_levels: 'u8', max_downline_levels: 'u8' } },

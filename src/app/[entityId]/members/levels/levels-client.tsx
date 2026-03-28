@@ -57,10 +57,8 @@ interface LevelFormData {
   discountRate: string; // basis points
   commissionBonus: string; // basis points
   minDirectReferrals: string;
-  minQualifiedReferrals: string;
   minTeamSize: string;
   minIndirectReferrals: string;
-  minQualifiedIndirectReferrals: string;
 }
 
 const EMPTY_LEVEL_FORM: LevelFormData = {
@@ -69,10 +67,8 @@ const EMPTY_LEVEL_FORM: LevelFormData = {
   discountRate: '',
   commissionBonus: '',
   minDirectReferrals: '',
-  minQualifiedReferrals: '',
   minTeamSize: '',
   minIndirectReferrals: '',
-  minQualifiedIndirectReferrals: '',
 };
 
 function describeRule(rule: UpgradeRule, te: ReturnType<typeof useTranslations<'enums'>>): string {
@@ -179,20 +175,12 @@ function LevelForm({ initial, onSubmit, submitLabel, busy }: {
             <Input type="number" min="0" value={form.minDirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minDirectReferrals: e.target.value }))} placeholder="0" />
           </div>
           <div className="space-y-1">
-            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minQualifiedReferrals')}>{t('levels.minQualifiedReferrals')}</LabelWithTip>
-            <Input type="number" min="0" value={form.minQualifiedReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minQualifiedReferrals: e.target.value }))} placeholder="0" />
-          </div>
-          <div className="space-y-1">
             <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minTeamSize')}>{t('levels.minTeamSize')}</LabelWithTip>
             <Input type="number" min="0" value={form.minTeamSize} onChange={(e) => setForm((prev) => ({ ...prev, minTeamSize: e.target.value }))} placeholder="0" />
           </div>
           <div className="space-y-1">
             <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minIndirectReferrals')}>{t('levels.minIndirectReferrals')}</LabelWithTip>
             <Input type="number" min="0" value={form.minIndirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minIndirectReferrals: e.target.value }))} placeholder="0" />
-          </div>
-          <div className="space-y-1">
-            <LabelWithTip className="text-xs text-muted-foreground" tip={t('help.minQualifiedIndirectReferrals')}>{t('levels.minQualifiedIndirectReferrals')}</LabelWithTip>
-            <Input type="number" min="0" value={form.minQualifiedIndirectReferrals} onChange={(e) => setForm((prev) => ({ ...prev, minQualifiedIndirectReferrals: e.target.value }))} placeholder="0" />
           </div>
         </div>
       </details>
@@ -233,10 +221,8 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
       shopId, data.name, parseUsdtInput(data.threshold),
       Number(data.discountRate), Number(data.commissionBonus),
       Number(data.minDirectReferrals) || 0,
-      Number(data.minQualifiedReferrals) || 0,
       Number(data.minTeamSize) || 0,
       Number(data.minIndirectReferrals) || 0,
-      Number(data.minQualifiedIndirectReferrals) || 0,
     ]);
   }, [addCustomLevel, shopId]);
 
@@ -246,10 +232,8 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
       shopId, levelId, data.name, parseUsdtInput(data.threshold),
       Number(data.discountRate), Number(data.commissionBonus),
       Number(data.minDirectReferrals) || 0,
-      Number(data.minQualifiedReferrals) || 0,
       Number(data.minTeamSize) || 0,
       Number(data.minIndirectReferrals) || 0,
-      Number(data.minQualifiedIndirectReferrals) || 0,
     ]);
     setEditId(null);
   }, [shopId, updateCustomLevel]);
@@ -357,10 +341,8 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
                           discountRate: String(level.discountRate),
                           commissionBonus: String(level.commissionBonus),
                           minDirectReferrals: String(level.minDirectReferrals),
-                          minQualifiedReferrals: String(level.minQualifiedReferrals),
                           minTeamSize: String(level.minTeamSize),
                           minIndirectReferrals: String(level.minIndirectReferrals),
-                          minQualifiedIndirectReferrals: String(level.minQualifiedIndirectReferrals),
                         }}
                         onSubmit={(data) => handleUpdate(level.id, data)}
                         submitLabel={tc('save')}
@@ -383,22 +365,16 @@ function CustomLevelsSection({ shopId }: { shopId: number | null }) {
                             </div>
                           </div>
                           {/* Show non-zero referral/team thresholds */}
-                          {(level.minDirectReferrals > 0 || level.minQualifiedReferrals > 0 || level.minTeamSize > 0 || level.minIndirectReferrals > 0 || level.minQualifiedIndirectReferrals > 0) && (
+                          {(level.minDirectReferrals > 0 || level.minTeamSize > 0 || level.minIndirectReferrals > 0) && (
                             <div className="flex flex-wrap gap-1.5 pt-1">
                               {level.minDirectReferrals > 0 && (
                                 <Badge variant="secondary" className="text-xs font-normal">{t('levels.minDirectReferrals')}: {level.minDirectReferrals}</Badge>
-                              )}
-                              {level.minQualifiedReferrals > 0 && (
-                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minQualifiedReferrals')}: {level.minQualifiedReferrals}</Badge>
                               )}
                               {level.minTeamSize > 0 && (
                                 <Badge variant="secondary" className="text-xs font-normal">{t('levels.minTeamSize')}: {level.minTeamSize}</Badge>
                               )}
                               {level.minIndirectReferrals > 0 && (
                                 <Badge variant="secondary" className="text-xs font-normal">{t('levels.minIndirectReferrals')}: {level.minIndirectReferrals}</Badge>
-                              )}
-                              {level.minQualifiedIndirectReferrals > 0 && (
-                                <Badge variant="secondary" className="text-xs font-normal">{t('levels.minQualifiedIndirectReferrals')}: {level.minQualifiedIndirectReferrals}</Badge>
                               )}
                             </div>
                           )}

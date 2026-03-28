@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { ApiPromise, WsProvider } from '@polkadot/api';
+import type { DefinitionsCall } from '@polkadot/types/types';
 import { getConfiguredEndpoints, getSeedEndpoints, NODE_HEALTH_CONFIG } from './constants';
 import {
   discoverPeers,
@@ -34,6 +35,55 @@ interface ApiContextValue {
   addManualNode: (endpoint: string) => Promise<boolean>;
 }
 
+const singleLineTypes: Record<string, any> = {
+  SingleLineMemberPositionInfo: {
+    position: 'u32',
+    queue_length: 'u32',
+    upline_levels: 'u8',
+    downline_levels: 'u8',
+    previous_account: 'Option<AccountId>',
+    next_account: 'Option<AccountId>',
+  },
+  SingleLinePayoutRecordView: {
+    order_id: 'u64',
+    buyer: 'AccountId',
+    amount: 'u128',
+    direction: 'u8',
+    level_distance: 'u16',
+    block_number: 'u64',
+  },
+  SingleLineMemberSummaryView: {
+    total_earned_as_upline: 'u128',
+    total_earned_as_downline: 'u128',
+    total_payout_count: 'u32',
+    last_payout_block: 'u64',
+  },
+  SingleLinePreviewOutput: {
+    beneficiary: 'AccountId',
+    amount: 'u128',
+    commission_type: 'CommissionType',
+    level: 'u16',
+  },
+  SingleLineMemberView: {
+    position_info: 'Option<SingleLineMemberPositionInfo>',
+    is_enabled: 'bool',
+    summary: 'SingleLineMemberSummaryView',
+    recent_payouts: 'Vec<SingleLinePayoutRecordView>',
+  },
+  SingleLineEntityStatsView: {
+    total_orders: 'u32',
+    total_upline_payouts: 'u32',
+    total_downline_payouts: 'u32',
+  },
+  SingleLineOverview: {
+    is_enabled: 'bool',
+    queue_length: 'u32',
+    remaining_capacity_in_tail_segment: 'u32',
+    segment_count: 'u32',
+    stats: 'SingleLineEntityStatsView',
+  },
+};
+
 const ApiContext = createContext<ApiContextValue>({
   api: null,
   isReady: false,
@@ -45,6 +95,101 @@ const ApiContext = createContext<ApiContextValue>({
   isDiscovering: false,
   addManualNode: async () => false,
 });
+
+// ============================================================================
+// Custom SCALE types + Runtime API definitions for EntityRegistryApi
+// ============================================================================
+
+const entityRegistryTypes: Record<string, any> = {
+  ProtectedFundsBreakdown: {
+    pending_commission: 'u128',
+    shopping_balance: 'u128',
+    unallocated_pool: 'u128',
+    pending_refund: 'u128',
+  },
+  FundProtectionRules: {
+    min_treasury_threshold: 'u128',
+    max_single_spend: 'u128',
+    max_daily_spend: 'u128',
+    daily_spent: 'u128',
+    daily_remaining: 'u128',
+  },
+  FundHealthStatus: {
+    level: 'u8',
+    min_operating: 'u128',
+    warning_threshold: 'u128',
+    below_threshold: 'bool',
+    below_min_operating: 'bool',
+  },
+  EntityFundsView: {
+    treasury_balance: 'u128',
+    protected_total: 'u128',
+    available: 'u128',
+    protected: 'ProtectedFundsBreakdown',
+    protection_config: 'Option<FundProtectionRules>',
+    health: 'FundHealthStatus',
+  },
+};
+
+const entityRegistryRuntimeDefs: DefinitionsCall = {
+  EntityRegistryApi: [
+    {
+      methods: {
+        get_entity_funds: {
+          description: 'Query entity fund overview with protected breakdown',
+          params: [{ name: 'entity_id', type: 'u64' }],
+          type: 'Option<EntityFundsView>',
+        },
+      },
+      version: 1,
+    },
+  ],
+  SingleLineQueryApi: [
+    {
+      methods: {
+        single_line_member_position: {
+          description: 'Query single-line member position info',
+          params: [
+            { name: 'entity_id', type: 'u64' },
+            { name: 'account', type: 'AccountId' },
+          ],
+          type: 'Option<SingleLineMemberPositionInfo>',
+        },
+        single_line_member_view: {
+          description: 'Query single-line member view',
+          params: [
+            { name: 'entity_id', type: 'u64' },
+            { name: 'account', type: 'AccountId' },
+          ],
+          type: 'Option<SingleLineMemberView>',
+        },
+        single_line_overview: {
+          description: 'Query single-line overview',
+          params: [{ name: 'entity_id', type: 'u64' }],
+          type: 'SingleLineOverview',
+        },
+        single_line_member_payouts: {
+          description: 'Query single-line member payouts',
+          params: [
+            { name: 'entity_id', type: 'u64' },
+            { name: 'account', type: 'AccountId' },
+          ],
+          type: 'Vec<SingleLinePayoutRecordView>',
+        },
+        single_line_preview_commission: {
+          description: 'Preview single-line commission outputs',
+          params: [
+            { name: 'entity_id', type: 'u64' },
+            { name: 'buyer', type: 'AccountId' },
+            { name: 'order_amount', type: 'u128' },
+          ],
+          type: 'Vec<SingleLinePreviewOutput>',
+        },
+      },
+      version: 1,
+    },
+  ],
+};
 
 /** Order endpoints: preferred first, then by health (healthy > slow > unknown > unhealthy), then by latency */
 function orderEndpoints(
@@ -137,7 +282,7 @@ export function ApiProvider({
         setError('WebSocket connection error');
       });
 
-      ApiPromise.create({ provider })
+      ApiPromise.create({ provider, types: { ...entityRegistryTypes, ...singleLineTypes }, runtime: entityRegistryRuntimeDefs })
         .then((apiInstance) =>
           apiInstance.isReady.then(() => {
             apiRef.current = apiInstance;

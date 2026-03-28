@@ -125,7 +125,7 @@ export interface OrderData {
   productId: number;
   buyer: string;
   seller: string;
-  payer: string;
+  payer: string | null;
   quantity: number;
   unitPrice: bigint;
   paymentAsset: PaymentAsset;
@@ -135,6 +135,8 @@ export interface OrderData {
   nexUsdtRate: bigint;
   tokenNexRate: bigint;
   tokenPaymentAmount: bigint;
+  shoppingBalanceUsed: bigint;
+  tokenDiscountTokensBurned: bigint;
   productCategory: ProductCategory;
   status: OrderStatus;
   escrowId: number | null;
@@ -214,10 +216,17 @@ export interface MemberData {
   account: string;
   status: MemberStatus;
   level: number;
+  effectiveLevel: number;
   referrer: string | null;
+  directReferrals: number;
+  indirectReferrals: number;
+  teamSize: number;
   joinedAt: number;
+  lastActiveAt: number;
   totalSpent: bigint;
+  upgradeEligibleSpent: bigint;
   orderCount: number;
+  banReason: string | null;
 }
 
 // 待审批会员数据
@@ -236,10 +245,8 @@ export interface CustomLevel {
   commissionBonus: number;
   // Referral / team upgrade thresholds (0 = no requirement)
   minDirectReferrals: number;
-  minQualifiedReferrals: number;
   minTeamSize: number;
   minIndirectReferrals: number;
-  minQualifiedIndirectReferrals: number;
 }
 
 // 等级系统完整数据（含系统级配置）
@@ -392,30 +399,24 @@ export interface CommissionCapConfig {
   maxTotalEarned: bigint;
 }
 
-export interface ReferralValidityConfig {
-  validityBlocks: number;
-  validOrders: number;
-}
-
 // 多级佣金层级（与链端 MultiLevelTier 一致）
 export interface MultiLevelTier {
   rate: number;
-  directMin: number;
-  teamMin: number;
-  spentMin: bigint;
-  levelMin: number;
+  requiredDirects: number;
+  requiredTeamSize: number;
+  requiredSpent: bigint;
+  requiredLevelId: number;
 }
 
 // 多级佣金配置（与链端 MultiLevelConfig 一致）
 export interface MultiLevelConfig {
-  tiers: MultiLevelTier[];
-  maxLevelsDeep: number;
+  levels: MultiLevelTier[];
 }
 
 // 多级佣金统计
 export interface MultiLevelStats {
   totalDistributed: bigint;
-  totalOrders: number;
+  orderCount: number;
   totalDistributionEntries: number;
 }
 
@@ -473,16 +474,60 @@ export interface SingleLineConfig {
 
 // 单线佣金统计
 export interface SingleLineStats {
-  totalDistributed: bigint;
-  totalLines: number;
-  avgLineDepth: number;
+  isEnabled: boolean;
+  queueLength: number;
+  remainingCapacityInTailSegment: number;
+  segmentCount: number;
+  stats: {
+    totalOrders: number;
+    totalUplinePayouts: number;
+    totalDownlinePayouts: number;
+  };
 }
 
 // 单线位置
 export interface SingleLinePosition {
   position: number;
-  upline: string | null;
-  downlineCount: number;
+  previousAccount: string | null;
+  nextAccount: string | null;
+  queueLength: number;
+  uplineLevels: number;
+  downlineLevels: number;
+}
+
+// 单线会员详情
+export interface SingleLineMemberViewData {
+  positionInfo: {
+    position: number;
+    queueLength: number;
+    uplineLevels: number;
+    downlineLevels: number;
+    previousAccount: string | null;
+    nextAccount: string | null;
+  } | null;
+  isEnabled: boolean;
+  summary: {
+    totalEarnedAsUpline: bigint;
+    totalEarnedAsDownline: bigint;
+    totalPayoutCount: number;
+    lastPayoutBlock: number;
+  };
+  recentPayouts: Array<{
+    orderId: number;
+    buyer: string;
+    amount: bigint;
+    direction: number;
+    levelDistance: number;
+    blockNumber: number;
+  }>;
+}
+
+// 单线预览输出
+export interface SingleLinePreviewData {
+  beneficiary: string;
+  amount: bigint;
+  commissionType: string;
+  level: number;
 }
 
 // 单线等级层数覆盖
@@ -524,9 +569,35 @@ export interface TeamInfo {
   directCount: number;
 }
 
+export interface CapBehaviorFixed {
+  type: 'Fixed';
+}
+
+export interface CapBehaviorUnlockByTeam {
+  type: 'UnlockByTeam';
+  directPerUnlock: number;
+  teamPerUnlock: number;
+  unlockPercent: number;
+}
+
+export type CapBehavior = CapBehaviorFixed | CapBehaviorUnlockByTeam;
+
+export interface LevelClaimRule {
+  baseCapPercent: number;
+  capBehavior: CapBehavior;
+}
+
+export interface FundingSummary {
+  nexCommissionRemainder: bigint;
+  tokenPlatformFeeRetention: bigint;
+  tokenCommissionRemainder: bigint;
+  nexCancelReturn: bigint;
+  totalFundingCount: number;
+}
+
 // 奖池佣金配置
 export interface PoolRewardConfig {
-  levelRatios: [number, number][];
+  levelRules: Array<[number, LevelClaimRule]>;
   roundDuration: number;
   tokenPoolEnabled: boolean;
 }
@@ -543,7 +614,6 @@ export interface PoolRewardStats {
 export interface LevelSnapshot {
   levelId: number;
   memberCount: number;
-  perMemberReward: bigint;
   claimedCount: number;
 }
 
@@ -551,10 +621,17 @@ export interface LevelSnapshot {
 export interface PoolRewardRoundInfo {
   roundId: number;
   startBlock: number;
+  endBlock: number | null;
   poolSnapshot: bigint;
+  eligibleCount: number;
+  perMemberReward: bigint;
+  claimedCount: number;
   levelSnapshots: LevelSnapshot[];
   tokenPoolSnapshot: bigint | null;
+  tokenPerMemberReward: bigint | null;
+  tokenClaimedCount: number;
   tokenLevelSnapshots: LevelSnapshot[] | null;
+  fundingSummary: FundingSummary | null;
 }
 
 // 领取记录

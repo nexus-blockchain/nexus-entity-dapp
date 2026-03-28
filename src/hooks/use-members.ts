@@ -18,9 +18,9 @@ function toPlain(raw: unknown): any | null {
 }
 
 function parseMemberStatus(obj: Record<string, unknown>): MemberStatus {
-  const bannedAt = obj.bannedAt ?? obj.banned_at;
-  if (bannedAt != null) return MemberStatus.Banned;
-  const activated = obj.activated ?? obj.isActive ?? obj.is_active;
+  const isBanned = Boolean(obj.is_banned ?? obj.isBanned ?? false);
+  if (isBanned) return MemberStatus.Banned;
+  const activated = obj.activated;
   return activated === false ? MemberStatus.Frozen : MemberStatus.Active;
 }
 
@@ -29,15 +29,24 @@ function parseMemberEntries(rawEntries: [any, any][], orderCountByAccount: Map<s
   return rawEntries.map(([key, value]) => {
     const obj = (toPlain(value) ?? {}) as Record<string, unknown>;
     const account = String(key.args?.[1]?.toString() ?? obj.account ?? '');
+    const directReferrals = Number(obj.directReferrals ?? obj.direct_referrals ?? 0);
+    const indirectReferrals = Number(obj.indirectReferrals ?? obj.indirect_referrals ?? 0);
     return {
-      entityId: Number(key.args?.[0]?.toString() ?? obj.entityId ?? 0),
+      entityId: Number(key.args?.[0]?.toString() ?? obj.entityId ?? obj.entity_id ?? 0),
       account,
       status: parseMemberStatus(obj),
       level: Number(obj.customLevelId ?? obj.custom_level_id ?? obj.level ?? 0),
+      effectiveLevel: Number(obj.effectiveLevelId ?? obj.effective_level_id ?? obj.customLevelId ?? obj.custom_level_id ?? obj.level ?? 0),
       referrer: obj.referrer ? String(obj.referrer) : null,
+      directReferrals,
+      indirectReferrals,
+      teamSize: Number(obj.teamSize ?? obj.team_size ?? directReferrals + indirectReferrals),
       joinedAt: Number(obj.joinedAt ?? obj.joined_at ?? 0),
+      lastActiveAt: Number(obj.lastActiveAt ?? obj.last_active_at ?? 0),
       totalSpent: BigInt(String(obj.totalSpent ?? obj.total_spent ?? 0)),
+      upgradeEligibleSpent: BigInt(String(obj.upgradeEligibleSpent ?? obj.upgrade_eligible_spent ?? obj.totalSpent ?? obj.total_spent ?? 0)),
       orderCount: orderCountByAccount.get(account) ?? Number(obj.orderCount ?? obj.order_count ?? 0),
+      banReason: decodeChainString(obj.banReason ?? obj.ban_reason ?? null),
     };
   });
 }
@@ -78,10 +87,8 @@ function parseCustomLevels(raw: unknown): CustomLevel[] {
       discountRate: Number(level.discountRate ?? level.discount_rate ?? 0),
       commissionBonus: Number(level.commissionBonus ?? level.commission_bonus ?? 0),
       minDirectReferrals: Number(level.minDirectReferrals ?? level.min_direct_referrals ?? 0),
-      minQualifiedReferrals: Number(level.minQualifiedReferrals ?? level.min_qualified_referrals ?? 0),
       minTeamSize: Number(level.minTeamSize ?? level.min_team_size ?? 0),
       minIndirectReferrals: Number(level.minIndirectReferrals ?? level.min_indirect_referrals ?? 0),
-      minQualifiedIndirectReferrals: Number(level.minQualifiedIndirectReferrals ?? level.min_qualified_indirect_referrals ?? 0),
     };
   });
 }
@@ -216,18 +223,6 @@ export function useMembers() {
     { staleTime: STALE_TIMES.members },
   );
 
-  const statsPolicyQuery = useEntityQuery<number | null>(
-    ['entity', entityId, 'members', 'statsPolicy'],
-    async (api) => {
-      if (!hasPallet(api, 'entityMember')) return null;
-      const fn = (api.query as any).entityMember.entityMemberStatsPolicy;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return Number(raw?.toString() ?? 0);
-    },
-    { staleTime: STALE_TIMES.members },
-  );
-
   const pendingQuery = useEntityQuery<PendingMemberData[]>(
     ['entity', entityId, 'members', 'pending'],
     async (api) => {
@@ -350,7 +345,6 @@ export function useMembers() {
 
   // --- Policy ---
   const setRegistrationPolicy = useEntityMutation('entityMember', 'setMemberPolicy', { invalidateKeys });
-  const setStatsPolicy = useEntityMutation('entityMember', 'setMemberStatsPolicy', { invalidateKeys });
 
   // --- Level ---
   const initializeLevels = useEntityMutation('entityMember', 'initLevelSystem', { invalidateKeys });
@@ -380,7 +374,6 @@ export function useMembers() {
     members: membersQuery.data ?? [],
     memberCount: memberCountQuery.data ?? 0,
     policy: policyQuery.data ?? 0,
-    statsPolicy: statsPolicyQuery.data ?? 0,
     pendingMembers: pendingQuery.data ?? [],
     levelSystem: levelSystemQuery.data ?? null,
     customLevels: levelSystemQuery.data?.levels ?? [],
@@ -406,7 +399,6 @@ export function useMembers() {
     cleanupExpiredPending,
     // Policy
     setRegistrationPolicy,
-    setStatsPolicy,
     // Level mutations
     initializeLevels,
     addCustomLevel,

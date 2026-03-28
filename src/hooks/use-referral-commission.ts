@@ -10,7 +10,6 @@ import type {
   ReferrerRecord,
   ReferrerGuardConfig,
   CommissionCapConfig,
-  ReferralValidityConfig,
 } from '@/lib/types/models';
 
 // ─── Parsers ────────────────────────────────────────────────
@@ -67,15 +66,6 @@ function parseCommissionCapConfig(raw: unknown): CommissionCapConfig | null {
   return {
     maxPerOrder: BigInt(String(obj.maxPerOrder ?? obj.max_per_order ?? 0)),
     maxTotalEarned: BigInt(String(obj.maxTotalEarned ?? obj.max_total_earned ?? 0)),
-  };
-}
-
-function parseReferralValidityConfig(raw: unknown): ReferralValidityConfig | null {
-  const obj = unwrapRaw(raw);
-  if (!obj) return null;
-  return {
-    validityBlocks: Number(obj.validityBlocks ?? obj.validity_blocks ?? 0),
-    validOrders: Number(obj.validOrders ?? obj.valid_orders ?? 0),
   };
 }
 
@@ -208,18 +198,6 @@ export function useReferralCommission() {
     { staleTime: STALE_TIMES.members },
   );
 
-  const validityConfigQuery = useEntityQuery<ReferralValidityConfig | null>(
-    ['entity', entityId, 'referral', 'validityConfig'],
-    async (api) => {
-      if (!hasPallet(api, PALLET)) return null;
-      const fn = (api.query as any)[PALLET].referralValidityConfigs;
-      if (!fn) return null;
-      const raw = await fn(entityId);
-      return parseReferralValidityConfig(raw);
-    },
-    { staleTime: STALE_TIMES.members },
-  );
-
   const useReferrerTotalEarned = (account: string | null) =>
     useEntityQuery<bigint>(
       ['entity', entityId, 'referral', 'totalEarned', account],
@@ -243,14 +221,12 @@ export function useReferralCommission() {
   const clearReferralConfig = useEntityMutation(PALLET, 'clearReferralConfig', { invalidateKeys });
   const setReferrerGuardConfig = useEntityMutation(PALLET, 'setReferrerGuardConfig', { invalidateKeys });
   const setCommissionCapConfig = useEntityMutation(PALLET, 'setCommissionCapConfig', { invalidateKeys });
-  const setReferralValidityConfig = useEntityMutation(PALLET, 'setReferralValidityConfig', { invalidateKeys });
 
   return {
     config: configQuery.data ?? null,
     stats: statsQuery.data ?? null,
     guardConfig: guardConfigQuery.data ?? null,
     capConfig: capConfigQuery.data ?? null,
-    validityConfig: validityConfigQuery.data ?? null,
     isLoading: configQuery.isLoading,
     error: configQuery.error,
     useReferrerRecord,
@@ -262,6 +238,5 @@ export function useReferralCommission() {
     clearReferralConfig,
     setReferrerGuardConfig,
     setCommissionCapConfig,
-    setReferralValidityConfig,
   };
 }

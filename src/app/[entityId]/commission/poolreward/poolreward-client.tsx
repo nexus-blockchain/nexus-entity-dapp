@@ -6,7 +6,7 @@ import { useEntityContext } from '@/app/[entityId]/entity-provider';
 import { PermissionGuard } from '@/components/permission-guard';
 import { TxStatusIndicator } from '@/components/tx-status-indicator';
 import { AdminPermission } from '@/lib/types/models';
-import type { LevelSnapshot, PoolRewardClaimRecord, CapBehavior } from '@/lib/types/models';
+import type { LevelSnapshot, PoolRewardClaimRecord, CapBehavior, AdminLevelRuleInfo, CompletedRoundSummary, PoolFundingRecord, PoolRewardMemberView } from '@/lib/types/models';
 import { usePoolRewardCommission } from '@/hooks/use-pool-reward-commission';
 import { useMembers } from '@/hooks/use-members';
 import { useCurrentBlock } from '@/hooks/use-current-block';
@@ -75,6 +75,8 @@ interface LevelRuleRow {
   directPerUnlock: string;
   teamPerUnlock: string;
   unlockPercent: string;
+  baselineDirect: string;
+  baselineTeam: string;
 }
 
 const emptyRuleRow = (): LevelRuleRow => ({
@@ -84,6 +86,8 @@ const emptyRuleRow = (): LevelRuleRow => ({
   directPerUnlock: '',
   teamPerUnlock: '',
   unlockPercent: '',
+  baselineDirect: '',
+  baselineTeam: '',
 });
 
 // ─── Config Section (Admin) ─────────────────────────────────
@@ -112,36 +116,57 @@ function ConfigSection() {
   const localBusy = isTxBusy(setPoolRewardConfig) || isTxBusy(clearPoolRewardConfig) || isTxBusy(pausePoolReward) || isTxBusy(resumePoolReward);
   useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
-  // ── Sync chain config → local state (only when not dirty) ──
-  const isDirty = useMemo(() => {
-    const chainRules = config?.levelRules ?? [];
-    if (localRules.length !== chainRules.length) return true;
-    for (let i = 0; i < localRules.length; i++) {
-      const [cId, cRule] = chainRules[i] ?? [0, { baseCapPercent: 0 }];
-      if (localRules[i].levelId !== String(cId) || localRules[i].baseCapPercent !== String(cRule.baseCapPercent ?? 0)) return true;
-    }
-    const chainDuration = config?.roundDuration ?? 0;
-    if (roundDuration !== '' && Number(roundDuration) !== chainDuration) return true;
-    return false;
-  }, [localRules, config, roundDuration]);
+  // ── Track whether user has manually edited (to prevent sync overwrite) ──
+  const [userEdited, setUserEdited] = useState(false);
 
+  // ── Sync chain config → local state ──
+  // Only sync from chain when user hasn't made manual edits.
+  // The initial load (localRules empty + chain has data) must always sync.
   useEffect(() => {
-    if (config?.levelRules && !isDirty) {
-      setLocalRules(
-        config.levelRules.map(([id, rule]) => ({
-          levelId: String(id),
-          baseCapPercent: String(rule.baseCapPercent),
-          behaviorType: rule.capBehavior.type,
-          directPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.directPerUnlock) : '',
-          teamPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.teamPerUnlock) : '',
-          unlockPercent: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.unlockPercent) : '',
-        })),
-      );
-    } else if (!config?.levelRules && localRules.length === 0) {
+    if (config?.levelRules) {
+      if (!userEdited) {
+        setLocalRules(
+          config.levelRules.map(([id, rule]) => ({
+            levelId: String(id),
+            baseCapPercent: String(rule.baseCapPercent),
+            behaviorType: rule.capBehavior.type,
+            directPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.directPerUnlock) : '',
+            teamPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.teamPerUnlock) : '',
+            unlockPercent: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.unlockPercent) : '',
+            baselineDirect: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.baselineDirect) : '',
+            baselineTeam: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.baselineTeam) : '',
+          })),
+        );
+      }
+    } else if (localRules.length === 0) {
       setLocalRules([emptyRuleRow()]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config?.levelRules]);
+
+  // Compute isDirty for UI display (unsaved badge, cancel button)
+  const isDirty = useMemo(() => {
+    if (!userEdited) return false;
+    const chainRules = config?.levelRules ?? [];
+    if (localRules.length !== chainRules.length) return true;
+    for (let i = 0; i < localRules.length; i++) {
+      const local = localRules[i];
+      const [cId, cRule] = chainRules[i] ?? [0, { baseCapPercent: 0, capBehavior: { type: 'Fixed' as const } }];
+      if (local.levelId !== String(cId)) return true;
+      if (local.baseCapPercent !== String(cRule.baseCapPercent ?? 0)) return true;
+      if (local.behaviorType !== cRule.capBehavior.type) return true;
+      if (local.behaviorType === 'UnlockByTeam' && cRule.capBehavior.type === 'UnlockByTeam') {
+        if (local.directPerUnlock !== String(cRule.capBehavior.directPerUnlock ?? 0)) return true;
+        if (local.teamPerUnlock !== String(cRule.capBehavior.teamPerUnlock ?? 0)) return true;
+        if (local.unlockPercent !== String(cRule.capBehavior.unlockPercent ?? 0)) return true;
+        if (local.baselineDirect !== String(cRule.capBehavior.baselineDirect ?? 0)) return true;
+        if (local.baselineTeam !== String(cRule.capBehavior.baselineTeam ?? 0)) return true;
+      }
+    }
+    const chainDuration = config?.roundDuration ?? 0;
+    if (roundDuration !== '' && Number(roundDuration) !== chainDuration) return true;
+    return false;
+  }, [userEdited, localRules, config, roundDuration]);
 
   // Build a map from level ID to level name for display
   const levelNameById = useMemo(() => {
@@ -163,13 +188,10 @@ function ConfigSection() {
     [customLevels, localRules],
   );
 
-  // Rule sum for display
-  const ruleSum = useMemo(() => {
-    return localRules.reduce((s, r) => s + (Number(r.baseCapPercent) || 0), 0);
-  }, [localRules]);
 
   // ── Row handlers ───────────────────────────────────────────
   const handleRowChange = useCallback((index: number, field: keyof LevelRuleRow, value: string) => {
+    setUserEdited(true);
     setLocalRules((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }, []);
 
@@ -178,10 +200,12 @@ function ConfigSection() {
       setFormError(t('errorMinOneLevel'));
       return;
     }
+    setUserEdited(true);
     setLocalRules((prev) => prev.filter((_, i) => i !== index));
   }, [localRules.length, t]);
 
   const handleAddRow = useCallback(() => {
+    setUserEdited(true);
     setLocalRules((prev) => [...prev, emptyRuleRow()]);
   }, []);
 
@@ -197,11 +221,14 @@ function ConfigSection() {
             directPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.directPerUnlock) : '',
             teamPerUnlock: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.teamPerUnlock) : '',
             unlockPercent: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.unlockPercent) : '',
+            baselineDirect: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.baselineDirect) : '',
+            baselineTeam: rule.capBehavior.type === 'UnlockByTeam' ? String(rule.capBehavior.baselineTeam) : '',
           }))
         : [emptyRuleRow()],
     );
     setRoundDuration('');
     setFormError('');
+    setUserEdited(false);
   }, [config]);
 
   // ── Save config (unified submit) ──────────────────────────
@@ -225,16 +252,31 @@ function ConfigSection() {
                   },
                 }
               : 'Fixed',
+            baseline_direct: r.behaviorType === 'UnlockByTeam' ? (Number(r.baselineDirect) || 0) : 0,
+            baseline_team: r.behaviorType === 'UnlockByTeam' ? (Number(r.baselineTeam) || 0) : 0,
           },
         ] as const);
       if (levelRules.length === 0) {
         setFormError(t('errorNoLevelRules'));
         return;
       }
-      const sum = levelRules.reduce((s, [, rule]) => s + rule.base_cap_percent, 0);
-      if (sum !== 10000) {
-        setFormError(t('errorRuleSumMismatch', { current: sum }));
-        return;
+      // Validate each rule individually: 1–10000 bps
+      for (const [levelId, rule] of levelRules) {
+        if (rule.base_cap_percent < 1 || rule.base_cap_percent > 10000) {
+          setFormError(t('errorInvalidCapPercent', { level: levelId }));
+          return;
+        }
+        if (typeof rule.cap_behavior === 'object' && 'UnlockByTeam' in rule.cap_behavior) {
+          const u = rule.cap_behavior.UnlockByTeam;
+          if (!u.direct_per_unlock || !u.team_per_unlock || !u.unlock_percent) {
+            setFormError(t('errorUnlockFieldsRequired', { level: levelId }));
+            return;
+          }
+          if (u.unlock_percent > 10000) {
+            setFormError(t('errorInvalidCapPercent', { level: levelId }));
+            return;
+          }
+        }
       }
       const dur = Number(roundDuration) || config?.roundDuration || 0;
       if (dur <= 0) {
@@ -242,6 +284,7 @@ function ConfigSection() {
         return;
       }
       setPoolRewardConfig.mutate([entityId, levelRules, dur]);
+      setUserEdited(false);
     },
     [entityId, localRules, roundDuration, config, setPoolRewardConfig, t, isLocked],
   );
@@ -395,10 +438,31 @@ function ConfigSection() {
                                     </SelectContent>
                                   </Select>
                                   {row.behaviorType === 'UnlockByTeam' && (
-                                    <div className="grid grid-cols-3 gap-2">
-                                      <Input type="number" min={0} placeholder={t('directPerUnlock')} value={row.directPerUnlock} onChange={(e) => handleRowChange(index, 'directPerUnlock', e.target.value)} />
-                                      <Input type="number" min={0} placeholder={t('teamPerUnlock')} value={row.teamPerUnlock} onChange={(e) => handleRowChange(index, 'teamPerUnlock', e.target.value)} />
-                                      <Input type="number" min={0} max={10000} placeholder={t('unlockPercent')} value={row.unlockPercent} onChange={(e) => handleRowChange(index, 'unlockPercent', e.target.value)} />
+                                    <div className="space-y-2">
+                                      <div className="grid grid-cols-3 gap-2">
+                                        <div className="space-y-1">
+                                          <Label className="text-xs text-muted-foreground">{t('directPerUnlock')}</Label>
+                                          <Input type="number" min={1} placeholder="1" value={row.directPerUnlock} onChange={(e) => handleRowChange(index, 'directPerUnlock', e.target.value)} />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs text-muted-foreground">{t('teamPerUnlock')}</Label>
+                                          <Input type="number" min={1} placeholder="1" value={row.teamPerUnlock} onChange={(e) => handleRowChange(index, 'teamPerUnlock', e.target.value)} />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs text-muted-foreground">{t('unlockPercent')}</Label>
+                                          <Input type="number" min={1} max={10000} placeholder="500" value={row.unlockPercent} onChange={(e) => handleRowChange(index, 'unlockPercent', e.target.value)} />
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                          <Label className="text-xs text-muted-foreground">{t('baselineDirect')}</Label>
+                                          <Input type="number" min={0} placeholder="0" value={row.baselineDirect} onChange={(e) => handleRowChange(index, 'baselineDirect', e.target.value)} />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs text-muted-foreground">{t('baselineTeam')}</Label>
+                                          <Input type="number" min={0} placeholder="0" value={row.baselineTeam} onChange={(e) => handleRowChange(index, 'baselineTeam', e.target.value)} />
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -433,14 +497,9 @@ function ConfigSection() {
                     >
                       {t('addLevelRule')}
                     </Button>
-                    {(() => {
-                      const ok = ruleSum === 10000;
-                      return (
-                        <span className={`text-xs font-mono ${ok ? 'text-green-600' : 'text-orange-500'}`}>
-                          {t('ruleSum')}: {ruleSum} / 10000 bps {ok ? '✓' : ''}
-                        </span>
-                      );
-                    })()}
+                    <span className="text-xs text-muted-foreground">
+                      {t('capPercentHint')}
+                    </span>
                   </div>
                 </>
               )}
@@ -454,7 +513,7 @@ function ConfigSection() {
                 type="number"
                 min={1}
                 value={roundDuration}
-                onChange={(e) => setRoundDuration(e.target.value)}
+                onChange={(e) => { setUserEdited(true); setRoundDuration(e.target.value); }}
                 placeholder={String(config?.roundDuration || 14400)}
               />
               <p className="text-xs text-muted-foreground">
@@ -524,6 +583,7 @@ function RoundInfoSection() {
           <MetricCard
             label={t('roundCountdown')}
             value={currentRound ? `${remaining}` : '-'}
+            subValue={remaining > 0 ? blocksToTime(remaining) : undefined}
             highlight={remaining > 0 && remaining < 100}
           />
           <MetricCard label={t('poolSnapshotLabel')} value={currentRound ? `${formatNex(currentRound.poolSnapshot)} NEX` : '-'} />
@@ -612,42 +672,6 @@ function LevelSnapshotTable({ snapshots, unit, perMemberReward }: { snapshots: L
         </tbody>
       </table>
     </div>
-  );
-}
-
-// ─── Stats Section ──────────────────────────────────────────
-
-function StatsSection() {
-  const t = useTranslations('poolReward');
-  const { stats } = usePoolRewardCommission();
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{t('statsSection')}</CardTitle>
-        <CardDescription>{t('statsSectionDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MetricCard
-            label={t('totalNexDistributed')}
-            value={`${formatNex(stats?.totalNexDistributed ?? BigInt(0))} NEX`}
-          />
-          <MetricCard
-            label={t('totalTokenDistributed')}
-            value={`${formatNex(stats?.totalTokenDistributed ?? BigInt(0))} Token`}
-          />
-          <MetricCard
-            label={t('totalRoundsCompleted')}
-            value={stats?.totalRoundsCompleted ?? 0}
-          />
-          <MetricCard
-            label={t('totalClaims')}
-            value={stats?.totalClaims ?? 0}
-          />
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -831,10 +855,12 @@ function ClaimHistoryTable({ records }: { records: PoolRewardClaimRecord[] }) {
 function MetricCard({
   label,
   value,
+  subValue,
   highlight,
 }: {
   label: string;
   value: string | number;
+  subValue?: string;
   highlight?: boolean;
 }) {
   return (
@@ -843,7 +869,560 @@ function MetricCard({
       <p className={`text-lg font-semibold ${highlight ? 'text-orange-500' : ''}`}>
         {String(value)}
       </p>
+      {subValue && <p className="text-xs text-muted-foreground">{subValue}</p>}
     </div>
+  );
+}
+
+/** Convert remaining blocks to approximate time string (6s per block) */
+function blocksToTime(blocks: number): string {
+  const totalSeconds = blocks * 6;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return `~${hours}h ${minutes}m`;
+  return `~${Math.max(1, minutes)}m`;
+}
+
+// ─── My Cap & Unlock Progress ───────────────────────────────
+
+/** Format USDT value (stored as integer cents or raw u128, assume 1:1 integer = 1 USDT for display) */
+function formatUsdt(value: bigint): string {
+  return value.toLocaleString();
+}
+
+function MyCapProgressSection() {
+  const t = useTranslations('poolReward');
+  const address = useWalletStore((s) => s.address);
+  const { memberView } = usePoolRewardCommission();
+  const { customLevels } = useMembers();
+
+  const levelNameById = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const level of customLevels) map[level.id] = level.name;
+    return map;
+  }, [customLevels]);
+
+  if (!address || !memberView) {
+    return null;
+  }
+
+  const { memberStats, capInfo } = memberView;
+  const isUnlockByTeam = capInfo.unlockPercent != null;
+  const capUsedPct = capInfo.currentCapUsdt > BigInt(0)
+    ? Number((capInfo.cumulativeClaimedUsdt * BigInt(10000)) / capInfo.currentCapUsdt) / 100
+    : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('myCapProgress')}</CardTitle>
+        <CardDescription>{t('myCapProgressDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* ── Member Stats ── */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MetricCard
+            label={t('effectiveLevelLabel')}
+            value={`Lv${memberView.effectiveLevel}${levelNameById[memberView.effectiveLevel] ? ` ${levelNameById[memberView.effectiveLevel]}` : ''}`}
+          />
+          <MetricCard label={t('memberStatsDirect')} value={memberStats.directCount} />
+          <MetricCard label={t('memberStatsTeam')} value={memberStats.teamCount} />
+          <MetricCard label={t('memberStatsTotalSpent')} value={formatUsdt(memberStats.totalSpent)} />
+        </div>
+
+        <Separator />
+
+        {/* ── Cap Overview ── */}
+        <div>
+          <div className="mb-3 flex items-center gap-2">
+            {capInfo.isCapped && (
+              <Badge variant="destructive">{t('capReached')}</Badge>
+            )}
+            <span className="text-sm text-muted-foreground">
+              {t('capProgressLabel', { pct: capUsedPct.toFixed(1) })}
+            </span>
+          </div>
+
+          {/* Progress bar */}
+          <div className="mb-4">
+            <Progress value={Math.min(capUsedPct, 100)} className="h-3" />
+            <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+              <span>{formatUsdt(capInfo.cumulativeClaimedUsdt)} USDT</span>
+              <span>{formatUsdt(capInfo.currentCapUsdt)} USDT</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <MetricCard label={t('cumulativeClaimed')} value={formatUsdt(capInfo.cumulativeClaimedUsdt)} />
+            <MetricCard label={t('currentCap')} value={formatUsdt(capInfo.currentCapUsdt)} />
+            <MetricCard
+              label={t('remainingCap')}
+              value={formatUsdt(capInfo.remainingCapUsdt)}
+              highlight={capInfo.isCapped}
+            />
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* ── Cap Breakdown ── */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold">{t('baseCap')}</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">{t('baseCap')}</p>
+              <p className="text-lg font-semibold">{formatUsdt(capInfo.baseCapUsdt)}</p>
+              <p className="text-xs text-muted-foreground">
+                {t('baseCapFormula', { percent: bpsToPercent(capInfo.baseCapPercent) })}
+              </p>
+            </div>
+
+            {isUnlockByTeam && capInfo.unlockAmountPerStepUsdt != null && (
+              <>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">{t('unlockProgress')}</p>
+                  <p className="text-lg font-semibold">{t('unlockCountLabel', { count: capInfo.unlockCount })}</p>
+                  <p className="text-xs text-muted-foreground">
+                    +{bpsToPercent(capInfo.unlockPercent!)} / {t('unlockAmountPerStep')}: {formatUsdt(capInfo.unlockAmountPerStepUsdt)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">{t('totalUnlocked')}</p>
+                  <p className="text-lg font-semibold">
+                    {formatUsdt(capInfo.unlockAmountPerStepUsdt * BigInt(capInfo.unlockCount))}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Baseline info */}
+          {isUnlockByTeam && memberView.levelRuleDetails.length > 0 && (() => {
+            const rule = memberView.levelRuleDetails.find((r) => r.levelId === memberView.effectiveLevel);
+            if (!rule || rule.capBehavior.type !== 'UnlockByTeam') return null;
+            const cb = rule.capBehavior;
+            if (!cb.baselineDirect && !cb.baselineTeam) return null;
+            return (
+              <p className="text-xs text-muted-foreground">
+                {t('baselineInfo', { direct: cb.baselineDirect, team: cb.baselineTeam })}
+              </p>
+            );
+          })()}
+
+          {!isUnlockByTeam && (
+            <p className="text-sm text-muted-foreground">
+              {t('capBehaviorFixedDesc', { percent: bpsToPercent(capInfo.baseCapPercent) })}
+            </p>
+          )}
+        </div>
+
+        {/* ── Next Unlock Requirements ── */}
+        {isUnlockByTeam && capInfo.nextDirectGap != null && capInfo.nextTeamGap != null && (
+          <>
+            <Separator />
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">{t('nextUnlockRequirement')}</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                  <p className="text-xs text-muted-foreground">{t('memberStatsDirect')}</p>
+                  <p className="text-sm font-medium">
+                    {capInfo.nextDirectGap > 0
+                      ? t('nextUnlockDirect', { gap: capInfo.nextDirectGap })
+                      : <Badge variant="secondary" className="text-xs">OK</Badge>}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                  <p className="text-xs text-muted-foreground">{t('memberStatsTeam')}</p>
+                  <p className="text-sm font-medium">
+                    {capInfo.nextTeamGap > 0
+                      ? t('nextUnlockTeam', { gap: capInfo.nextTeamGap })
+                      : <Badge variant="secondary" className="text-xs">OK</Badge>}
+                  </p>
+                </div>
+                {capInfo.nextUnlockIncreaseUsdt != null && (
+                  <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+                    <p className="text-xs text-muted-foreground">{t('nextUnlockReward', { amount: formatUsdt(capInfo.nextUnlockIncreaseUsdt) })}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── How to Increase ── */}
+        <Separator />
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">{t('howToIncrease')}</h3>
+          <p className="text-sm text-muted-foreground">
+            {capInfo.isCapped ? t('capReachedDesc') : t('capNotReachedDesc')}
+          </p>
+          <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+            <li>{t('increaseBySpending')}</li>
+            {isUnlockByTeam && (() => {
+              const rule = memberView.levelRuleDetails.find((r) => r.levelId === memberView.effectiveLevel);
+              if (!rule || rule.capBehavior.type !== 'UnlockByTeam') return null;
+              return (
+                <li>{t('increaseByTeam', { direct: rule.capBehavior.directPerUnlock, team: rule.capBehavior.teamPerUnlock })}</li>
+              );
+            })()}
+            <li>{t('increaseByLevel')}</li>
+          </ul>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Admin Overview (Level Rules + Capped Counts + Pool Balances) ────
+
+function AdminOverviewSection() {
+  const t = useTranslations('poolReward');
+  const { adminView } = usePoolRewardCommission();
+  const currentBlock = useCurrentBlock();
+  const { customLevels } = useMembers();
+
+  const levelNameById = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const level of customLevels) map[level.id] = level.name;
+    return map;
+  }, [customLevels]);
+
+  if (!adminView) return null;
+
+  const deficit = adminView.tokenPoolDeficit;
+  const hasDeficit = deficit > BigInt(0);
+  const pending = adminView.pendingConfig;
+  const pendingRemaining = pending && currentBlock ? Math.max(0, pending.applyAfter - currentBlock) : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('adminOverview')}</CardTitle>
+        <CardDescription>{t('adminOverviewDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Pool balances */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MetricCard label={t('currentNexPool')} value={`${formatNex(adminView.currentPoolBalance)} NEX`} />
+          <MetricCard label={t('currentTokenPool')} value={`${formatNex(adminView.currentTokenPoolBalance)} Token`} />
+          <MetricCard label={t('totalNexDistributed')} value={`${formatNex(adminView.totalNexDistributed)} NEX`} />
+          <MetricCard label={t('totalTokenDistributed')} value={`${formatNex(adminView.totalTokenDistributed)} Token`} />
+          <MetricCard label={t('totalRoundsCompleted')} value={adminView.totalRoundsCompleted} />
+          <MetricCard label={t('totalClaims')} value={adminView.totalClaims} />
+        </div>
+
+        {/* Token deficit warning */}
+        {hasDeficit && (
+          <div className="rounded-lg border border-destructive bg-destructive/10 p-3">
+            <p className="text-sm font-medium text-destructive">{t('tokenDeficitWarning')}</p>
+            <p className="text-lg font-bold text-destructive">{formatNex(deficit)} Token</p>
+            <p className="text-xs text-muted-foreground">{t('tokenDeficitHint')}</p>
+          </div>
+        )}
+
+        {/* Level rules table with member counts + capped counts */}
+        {adminView.levelRuleDetails.length > 0 && (
+          <>
+            <Separator />
+            <h3 className="text-sm font-semibold">{t('levelRulesWithCounts')}</h3>
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="px-3 py-2 text-left font-medium">{t('levelId')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('baseCapPercent')}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t('capBehavior')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('memberCount')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('cappedCount')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('cappedRatio')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminView.levelRuleDetails.map((rule) => {
+                    const capPct = rule.memberCount > 0
+                      ? Math.round((rule.cappedMemberCount / rule.memberCount) * 100)
+                      : 0;
+                    return (
+                      <tr key={rule.levelId} className="border-b last:border-0">
+                        <td className="px-3 py-2">
+                          <Badge variant="outline">
+                            Lv{rule.levelId}
+                            {levelNameById[rule.levelId] ? ` ${levelNameById[rule.levelId]}` : ''}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">{bpsToPercent(rule.baseCapPercent)}</td>
+                        <td className="px-3 py-2 text-xs">
+                          {rule.capBehavior.type === 'Fixed'
+                            ? t('capBehaviorFixed')
+                            : `${t('capBehaviorUnlockByTeam')} +${bpsToPercent(rule.capBehavior.unlockPercent)}${rule.capBehavior.baselineDirect || rule.capBehavior.baselineTeam ? ` (${t('baseline')}: ${rule.capBehavior.baselineDirect}/${rule.capBehavior.baselineTeam})` : ''}`}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">{rule.memberCount}</td>
+                        <td className="px-3 py-2 text-right font-mono">{rule.cappedMemberCount}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Progress value={capPct} className="h-2 w-12" />
+                            <span className="font-mono text-xs">{capPct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {/* Pending config */}
+        {pending && (
+          <>
+            <Separator />
+            <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{t('pendingConfig')}</Badge>
+                {pendingRemaining > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {t('pendingApplyIn', { blocks: pendingRemaining })} ({blocksToTime(pendingRemaining)})
+                  </span>
+                )}
+              </div>
+              <p className="text-sm">
+                {t('pendingRoundDuration')}: {pending.roundDuration} {t('blocks')}
+              </p>
+              <p className="text-sm">
+                {t('pendingLevels')}: {pending.levelRules.map(([l, cap]) => `Lv${l}: ${bpsToPercent(cap)}`).join(', ')}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t('pendingApplyAfterBlock', { block: pending.applyAfter })}
+              </p>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Round History Section ───────────────────────────────
+
+function RoundHistorySection() {
+  const t = useTranslations('poolReward');
+  const { adminView } = usePoolRewardCommission();
+  const { customLevels } = useMembers();
+
+  const levelNameById = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const level of customLevels) map[level.id] = level.name;
+    return map;
+  }, [customLevels]);
+
+  const sortedHistory = useMemo(() => {
+    if (!adminView?.roundHistory?.length) return [];
+    return [...adminView.roundHistory].reverse();
+  }, [adminView]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-lg">{t('roundHistoryTitle')}</CardTitle>
+            <CardDescription>{t('roundHistoryDesc')}</CardDescription>
+          </div>
+          {sortedHistory.length > 0 && (
+            <Badge variant="secondary">{sortedHistory.length}</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {sortedHistory.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">{t('noRoundHistory')}</p>
+        ) : (
+          <div className="space-y-2">
+            {sortedHistory.map((round) => (
+              <RoundHistoryItem key={round.roundId} round={round} levelNameById={levelNameById} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RoundHistoryItem({ round, levelNameById }: { round: CompletedRoundSummary; levelNameById: Record<number, string> }) {
+  const t = useTranslations('poolReward');
+  const [expanded, setExpanded] = useState(false);
+  const totalMembers = round.eligibleCount || round.levelSnapshots.reduce((s, snap) => s + snap.memberCount, 0);
+  const claimPct = totalMembers > 0 ? Math.round((round.claimedCount / totalMembers) * 100) : 0;
+
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between p-3 text-left text-sm"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{t('roundLabel', { id: round.roundId })}</span>
+            <span className="text-xs text-muted-foreground">#{round.startBlock} — #{round.endBlock}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <span>{formatNex(round.poolSnapshot)} NEX</span>
+            <span>{t('claimRateValue', { pct: claimPct, claimed: round.claimedCount, total: totalMembers })}</span>
+            <span>{formatNex(round.perMemberReward)} NEX/{t('perMember')}</span>
+          </div>
+        </div>
+        <span className="text-xs text-muted-foreground">{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t px-3 pb-3 pt-2 space-y-3">
+          {/* Level progress */}
+          {round.levelSnapshots.length > 0 && (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="px-3 py-1.5 text-left font-medium">{t('levelId')}</th>
+                    <th className="px-3 py-1.5 text-right font-medium">{t('memberCount')}</th>
+                    <th className="px-3 py-1.5 text-right font-medium">{t('perMemberReward')}</th>
+                    <th className="px-3 py-1.5 text-right font-medium">{t('claimedProgress')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {round.levelSnapshots.map((snap) => {
+                    const pct = snap.memberCount > 0 ? Math.round((snap.claimedCount / snap.memberCount) * 100) : 0;
+                    return (
+                      <tr key={snap.levelId} className="border-b last:border-0">
+                        <td className="px-3 py-1.5">
+                          <Badge variant="outline">Lv{snap.levelId}{levelNameById[snap.levelId] ? ` ${levelNameById[snap.levelId]}` : ''}</Badge>
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{snap.memberCount}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{formatNex(snap.perMemberReward)} NEX</td>
+                        <td className="px-3 py-1.5 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Progress value={pct} className="h-2 w-12" />
+                            <span className="font-mono text-xs">{snap.claimedCount}/{snap.memberCount}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Funding summary */}
+          {round.fundingSummary && round.fundingSummary.totalFundingCount > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                {t('fundingSources')} · {round.fundingSummary.totalFundingCount} {t('entries')}
+              </p>
+              <FundingSummaryGrid summary={round.fundingSummary} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FundingSummaryGrid({ summary }: { summary: CompletedRoundSummary['fundingSummary'] }) {
+  const t = useTranslations('poolReward');
+  const items = [
+    { label: t('sourceOrderCommission'), value: summary.nexCommissionRemainder, unit: 'NEX' },
+    { label: t('sourceTokenPlatformFee'), value: summary.tokenPlatformFeeRetention, unit: 'Token' },
+    { label: t('sourceTokenCommission'), value: summary.tokenCommissionRemainder, unit: 'Token' },
+    { label: t('sourceCancelReturn'), value: summary.nexCancelReturn, unit: 'NEX' },
+  ].filter((item) => item.value > BigInt(0));
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {items.map((item) => (
+        <div key={item.label} className="rounded bg-muted/50 px-2 py-1.5 text-xs">
+          <p className="text-muted-foreground">{item.label}</p>
+          <p className="font-mono font-medium">{formatNex(item.value)} {item.unit}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Funding Records Section ─────────────────────────────
+
+function FundingRecordsSection() {
+  const t = useTranslations('poolReward');
+  const { fundingRecords } = usePoolRewardCommission();
+
+  const sortedRecords = useMemo(() => {
+    if (!fundingRecords?.length) return [];
+    return [...fundingRecords].reverse();
+  }, [fundingRecords]);
+
+  const sourceLabels: Record<string, string> = {
+    OrderCommissionRemainder: t('sourceOrderCommission'),
+    TokenPlatformFeeRetention: t('sourceTokenPlatformFee'),
+    TokenCommissionRemainder: t('sourceTokenCommission'),
+    CancelReturn: t('sourceCancelReturn'),
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-lg">{t('fundingRecordsTitle')}</CardTitle>
+            <CardDescription>{t('fundingRecordsDesc')}</CardDescription>
+          </div>
+          {sortedRecords.length > 0 && (
+            <Badge variant="secondary">{sortedRecords.length}</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {sortedRecords.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">{t('noFundingRecords')}</p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="px-3 py-2 text-left font-medium">{t('fundingSource')}</th>
+                  <th className="px-3 py-2 text-right font-medium">NEX</th>
+                  <th className="px-3 py-2 text-right font-medium">Token</th>
+                  <th className="px-3 py-2 text-right font-medium">{t('orderId')}</th>
+                  <th className="px-3 py-2 text-right font-medium">{t('blockNumber')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRecords.map((rec, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">
+                        {sourceLabels[rec.source] ?? rec.source}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {rec.nexAmount > BigInt(0) ? `${formatNex(rec.nexAmount)}` : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {rec.tokenAmount > BigInt(0) ? `${formatNex(rec.tokenAmount)}` : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {rec.orderId > 0 ? `#${rec.orderId}` : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">#{rec.blockNumber}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -879,9 +1458,12 @@ export function PoolRewardPage() {
           </Link>
         </div>
 
-        <MyParticipationSection />
+        <AdminOverviewSection />
         <RoundInfoSection />
-        <StatsSection />
+        <RoundHistorySection />
+        <FundingRecordsSection />
+        <MyParticipationSection />
+        <MyCapProgressSection />
         <ConfigSection />
       </div>
   );

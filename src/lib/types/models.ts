@@ -330,7 +330,7 @@ export interface CoreCommissionConfig {
   maxCommissionRate: number;
   enabled: boolean;
   withdrawalCooldown: number;
-  creatorRewardRate: number;
+  ownerRewardRate: number;
   tokenWithdrawalCooldown: number;
   pluginBudgetCaps: PluginBudgetCaps | null;
 }
@@ -578,6 +578,8 @@ export interface CapBehaviorUnlockByTeam {
   directPerUnlock: number;
   teamPerUnlock: number;
   unlockPercent: number;
+  baselineDirect: number;
+  baselineTeam: number;
 }
 
 export type CapBehavior = CapBehaviorFixed | CapBehaviorUnlockByTeam;
@@ -641,6 +643,141 @@ export interface PoolRewardClaimRecord {
   tokenAmount: bigint;
   levelId: number;
   claimedAt: number;
+}
+
+// 管理员等级规则（含人数 + 达上限人数）
+export interface AdminLevelRuleInfo {
+  levelId: number;
+  baseCapPercent: number;
+  capBehavior: CapBehavior;
+  memberCount: number;
+  cappedMemberCount: number;
+}
+
+// 等级领取进度（轮次快照 + 比例 + 每人奖励）
+export interface LevelProgressInfo {
+  levelId: number;
+  ratioBps: number;
+  memberCount: number;
+  claimedCount: number;
+  perMemberReward: bigint;
+}
+
+// 已完成轮次摘要
+export interface CompletedRoundSummary {
+  roundId: number;
+  startBlock: number;
+  endBlock: number;
+  poolSnapshot: bigint;
+  nexUsdtRateSnapshot: number | null;
+  eligibleCount: number;
+  perMemberReward: bigint;
+  claimedCount: number;
+  tokenPoolSnapshot: bigint | null;
+  tokenPerMemberReward: bigint | null;
+  tokenClaimedCount: number;
+  levelSnapshots: LevelProgressInfo[];
+  tokenLevelSnapshots: LevelProgressInfo[] | null;
+  fundingSummary: FundingSummary;
+}
+
+// 待生效配置
+export interface PendingConfigInfo {
+  levelRules: Array<[number, number]>;
+  roundDuration: number;
+  applyAfter: number;
+}
+
+// 资金入账明细
+export interface PoolFundingRecord {
+  source: string;
+  nexAmount: bigint;
+  tokenAmount: bigint;
+  orderId: number;
+  blockNumber: number;
+}
+
+// 管理员视图（from runtime API）
+export interface PoolRewardAdminView {
+  levelRules: Array<[number, number]>;
+  levelRuleDetails: AdminLevelRuleInfo[];
+  roundDuration: number;
+  tokenPoolEnabled: boolean;
+  currentRound: PoolRewardRoundInfo | null;
+  totalNexDistributed: bigint;
+  totalTokenDistributed: bigint;
+  totalRoundsCompleted: number;
+  totalClaims: number;
+  roundHistory: CompletedRoundSummary[];
+  pendingConfig: PendingConfigInfo | null;
+  isPaused: boolean;
+  isGlobalPaused: boolean;
+  currentPoolBalance: bigint;
+  currentTokenPoolBalance: bigint;
+  tokenPoolDeficit: bigint;
+}
+
+// 等级规则摘要（LevelRuleSummaryInfo）
+export interface LevelRuleSummaryInfo {
+  levelId: number;
+  baseCapPercent: number;
+  capBehavior: CapBehavior;
+}
+
+// 会员统计信息
+export interface MemberStatsInfo {
+  directCount: number;
+  teamCount: number;
+  totalSpent: bigint;
+}
+
+// 会员累计上限详情
+export interface MemberCapInfo {
+  cumulativeClaimedUsdt: bigint;
+  currentCapUsdt: bigint;
+  remainingCapUsdt: bigint;
+  isCapped: boolean;
+  quotaNexBeforeCap: bigint;
+  rateSnapshotUsed: number | null;
+  baseCapPercent: number;
+  baseCapUsdt: bigint;
+  unlockCount: number;
+  unlockPercent: number | null;
+  unlockAmountPerStepUsdt: bigint | null;
+  nextDirectGap: number | null;
+  nextTeamGap: number | null;
+  nextUnlockIncreaseUsdt: bigint | null;
+}
+
+// 会员沉淀池详情视图（from runtime API）
+export interface PoolRewardMemberView {
+  roundDuration: number;
+  tokenPoolEnabled: boolean;
+  levelRules: Array<[number, number]>;
+  levelRuleDetails: LevelRuleSummaryInfo[];
+
+  currentRoundId: number;
+  roundStartBlock: number;
+  roundEndBlock: number;
+  poolSnapshot: bigint;
+  tokenPoolSnapshot: bigint | null;
+
+  effectiveLevel: number;
+  claimableNex: bigint;
+  claimableToken: bigint;
+  alreadyClaimed: boolean;
+  roundExpired: boolean;
+  lastClaimedRound: number;
+  memberStats: MemberStatsInfo;
+  capInfo: MemberCapInfo;
+
+  levelProgress: LevelProgressInfo[];
+  tokenLevelProgress: LevelProgressInfo[] | null;
+
+  claimHistory: PoolRewardClaimRecord[];
+
+  isPaused: boolean;
+  hasPendingConfig: boolean;
 }
 
 // KYC 记录
@@ -713,6 +850,34 @@ export interface ConfirmDialogConfig {
   description: string;
   severity: 'info' | 'warning' | 'danger';
   requireInput?: string;
+}
+
+// ─── 强制复购配置 ────────────────────────────────────────────
+
+/** 链上 RepurchaseConfig 对应的前端类型 */
+export interface RepurchaseConfig {
+  /** 达到此 USDT 等值后触发复购（0 = 无门槛） */
+  minPackageUsdt: number;
+  /** 是否强制执行（达到门槛后触发事件/下单） */
+  enforced: boolean;
+  /** 是否启用链上自动下单 */
+  autoOrder: boolean;
+  /** 自动复购套餐 product_id（autoOrder=true 时必须 > 0） */
+  defaultProductId: number;
+  /** 购物余额 TTL（区块数，0=永不过期） */
+  shoppingBalanceTtlBlocks: number;
+  /** 购物余额超过此 USDT 阈值时阻止领奖（USDT，精度 10^6，0=不限制） */
+  maxShoppingBalanceUsdt: number;
+}
+
+/** 购物余额到期状态（前端计算，不上链） */
+export interface ShoppingBalanceExpiryEntry {
+  account: string;
+  lastCredited: number;
+  expireAtBlock: number;
+  /** 负数 = 已过期，正数 = 距过期剩余区块 */
+  blocksLeft: number;
+  status: 'expired' | 'expiring_soon' | 'active';
 }
 
 // 通知

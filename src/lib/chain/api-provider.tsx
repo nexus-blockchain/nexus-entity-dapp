@@ -84,6 +84,103 @@ const singleLineTypes: Record<string, any> = {
   },
 };
 
+// ── Pool Reward Runtime API types ──
+const poolRewardTypes: Record<string, any> = {
+  CapBehaviorInfo: {
+    _enum: {
+      Fixed: null,
+      UnlockByTeam: {
+        direct_per_unlock: 'u32',
+        team_per_unlock: 'u32',
+        unlock_percent: 'u16',
+        baseline_direct: 'u32',
+        baseline_team: 'u32',
+      },
+    },
+  },
+  AdminLevelRuleInfo: {
+    level_id: 'u8',
+    base_cap_percent: 'u16',
+    cap_behavior: 'CapBehaviorInfo',
+    member_count: 'u32',
+    capped_member_count: 'u32',
+  },
+  LevelRuleSummaryInfo: {
+    level_id: 'u8',
+    base_cap_percent: 'u16',
+    cap_behavior: 'CapBehaviorInfo',
+  },
+  LevelProgressInfo: {
+    level_id: 'u8',
+    ratio_bps: 'u16',
+    member_count: 'u32',
+    claimed_count: 'u32',
+    per_member_reward: 'u128',
+  },
+  FundingSummaryInfo: {
+    nex_commission_remainder: 'u128',
+    token_platform_fee_retention: 'u128',
+    token_commission_remainder: 'u128',
+    nex_cancel_return: 'u128',
+    total_funding_count: 'u32',
+  },
+  RoundDetailInfo: {
+    round_id: 'u64',
+    start_block: 'u64',
+    end_block: 'u64',
+    pool_snapshot: 'u128',
+    nex_usdt_rate_snapshot: 'Option<u64>',
+    eligible_count: 'u32',
+    per_member_reward: 'u128',
+    claimed_count: 'u32',
+    token_pool_snapshot: 'Option<u128>',
+    token_per_member_reward: 'Option<u128>',
+    token_claimed_count: 'u32',
+    level_snapshots: 'Vec<LevelProgressInfo>',
+    token_level_snapshots: 'Option<Vec<LevelProgressInfo>>',
+  },
+  CompletedRoundInfo: {
+    round_id: 'u64',
+    start_block: 'u64',
+    end_block: 'u64',
+    pool_snapshot: 'u128',
+    nex_usdt_rate_snapshot: 'Option<u64>',
+    eligible_count: 'u32',
+    per_member_reward: 'u128',
+    claimed_count: 'u32',
+    token_pool_snapshot: 'Option<u128>',
+    token_per_member_reward: 'Option<u128>',
+    token_claimed_count: 'u32',
+    level_snapshots: 'Vec<LevelProgressInfo>',
+    token_level_snapshots: 'Option<Vec<LevelProgressInfo>>',
+    funding_summary: 'FundingSummaryInfo',
+  },
+  PendingConfigInfo: {
+    level_rules: 'Vec<(u8, u16)>',
+    level_rule_details: 'Vec<LevelRuleSummaryInfo>',
+    round_duration: 'u64',
+    apply_after: 'u64',
+  },
+  PoolRewardAdminView: {
+    level_rules: 'Vec<(u8, u16)>',
+    level_rule_details: 'Vec<AdminLevelRuleInfo>',
+    round_duration: 'u64',
+    token_pool_enabled: 'bool',
+    current_round: 'Option<RoundDetailInfo>',
+    total_nex_distributed: 'u128',
+    total_token_distributed: 'u128',
+    total_rounds_completed: 'u64',
+    total_claims: 'u64',
+    round_history: 'Vec<CompletedRoundInfo>',
+    pending_config: 'Option<PendingConfigInfo>',
+    is_paused: 'bool',
+    is_global_paused: 'bool',
+    current_pool_balance: 'u128',
+    current_token_pool_balance: 'u128',
+    token_pool_deficit: 'u128',
+  },
+};
+
 const ApiContext = createContext<ApiContextValue>({
   api: null,
   isReady: false,
@@ -189,6 +286,18 @@ const entityRegistryRuntimeDefs: DefinitionsCall = {
       version: 1,
     },
   ],
+  PoolRewardDetailApi: [
+    {
+      methods: {
+        get_pool_reward_admin_view: {
+          description: 'Get comprehensive pool reward admin view',
+          params: [{ name: 'entity_id', type: 'u64' }],
+          type: 'Option<PoolRewardAdminView>',
+        },
+      },
+      version: 1,
+    },
+  ],
 };
 
 /** Order endpoints: preferred first, then by health (healthy > slow > unknown > unhealthy), then by latency */
@@ -282,7 +391,7 @@ export function ApiProvider({
         setError('WebSocket connection error');
       });
 
-      ApiPromise.create({ provider, types: { ...entityRegistryTypes, ...singleLineTypes }, runtime: entityRegistryRuntimeDefs })
+      ApiPromise.create({ provider, types: { ...entityRegistryTypes, ...singleLineTypes, ...poolRewardTypes }, runtime: entityRegistryRuntimeDefs })
         .then((apiInstance) =>
           apiInstance.isReady.then(() => {
             apiRef.current = apiInstance;

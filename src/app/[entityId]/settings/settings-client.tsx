@@ -13,6 +13,7 @@ import { AdminPermission } from '@/lib/types/models';
 import { EntityType, GovernanceMode } from '@/lib/types/enums';
 import type { ConfirmDialogConfig } from '@/lib/types/models';
 
+import { Lock, ShieldCheck } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -472,6 +473,100 @@ function FundManagementSection() {
 }
 
 
+// ─── Section: Governance Lock ───────────────────────────────
+
+function GovernanceLockSection() {
+  const { entityId, entity, isOwner, governanceMode } = useEntityContext();
+  const t = useTranslations('settings');
+  const te = useTranslations('enums');
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const lockGovernance = useEntityMutation('governance', 'lockGovernance', {
+    invalidateKeys: [['entity', entityId]],
+  });
+
+  const handleLockClick = useCallback(() => {
+    setDialogOpen(true);
+  }, []);
+
+  const confirmLock = useCallback(() => {
+    lockGovernance.mutate([entityId]);
+    setDialogOpen(false);
+  }, [entityId, lockGovernance]);
+
+  const isLockBusy = lockGovernance.txState.status === 'signing' || lockGovernance.txState.status === 'broadcasting';
+
+  const dialogConfig: ConfirmDialogConfig = {
+    title: t('lockGovernanceConfirmTitle'),
+    description: t('lockGovernanceConfirmDesc'),
+    severity: 'danger',
+    requireInput: entity?.name,
+  };
+
+  const isLocked = entity?.governanceLocked === true;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Lock className="h-5 w-5" />
+          {t('lockGovernance')}
+        </CardTitle>
+        <CardDescription>{t('lockGovernanceDesc')}</CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Current governance mode */}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">{te('governanceMode')}:</span>
+          <Badge variant="outline">{te(`governanceMode.${governanceMode}`)}</Badge>
+        </div>
+
+        {isLocked ? (
+          <div className="flex items-center gap-3 rounded-md border border-green-500/30 bg-green-500/5 p-4">
+            <ShieldCheck className="h-5 w-5 text-green-600" />
+            <div>
+              <p className="text-sm font-medium text-green-700 dark:text-green-400">{t('governanceLocked')}</p>
+              <p className="text-xs text-muted-foreground">{t('governanceLockedDesc')}</p>
+            </div>
+          </div>
+        ) : isOwner ? (
+          <>
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              {governanceMode === GovernanceMode.None
+                ? t('lockGovernanceNoneDesc')
+                : t('lockGovernanceFullDAODesc')}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleLockClick}
+                disabled={isLockBusy}
+              >
+                {t('lockGovernance')}
+              </Button>
+              <TxStatusIndicator txState={lockGovernance.txState} />
+            </div>
+
+            <TxConfirmDialog
+              open={dialogOpen}
+              onClose={() => setDialogOpen(false)}
+              onConfirm={confirmLock}
+              config={dialogConfig}
+            />
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('ownerOnlyGovernance')}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
 // ─── Section: Lifecycle Operations ──────────────────────────
 
 function LifecycleSection() {
@@ -775,6 +870,7 @@ export function SettingsPage() {
           <TabsTrigger value="info">{t('entityInfo')}</TabsTrigger>
           <TabsTrigger value="admin">{t('adminManagement')}</TabsTrigger>
           <TabsTrigger value="fund">{t('fundManagement')}</TabsTrigger>
+          <TabsTrigger value="governance">{t('lockGovernance')}</TabsTrigger>
           <TabsTrigger value="lifecycle">{t('lifecycle')}</TabsTrigger>
         </TabsList>
 
@@ -800,6 +896,10 @@ export function SettingsPage() {
           <PermissionGuard required={AdminPermission.ENTITY_MANAGE}>
             <FundManagementSection />
           </PermissionGuard>
+        </TabsContent>
+
+        <TabsContent value="governance">
+          <GovernanceLockSection />
         </TabsContent>
 
         <TabsContent value="lifecycle">

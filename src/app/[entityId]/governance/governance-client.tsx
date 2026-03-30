@@ -125,7 +125,7 @@ const PROPOSAL_TYPES_KEYS: Record<string, { types: Record<string, ProposalTypeIn
       CommissionModesChange: { fields: { modes: 'u16' } },
       CommissionRateChange: { fields: { new_rate: 'u16' } },
       CommissionToggle: { fields: { enabled: 'bool' } },
-      CreatorRewardRateChange: { fields: { new_rate: 'u16' } },
+      OwnerRewardRateChange: { fields: { new_rate: 'u16' } },
       DirectRewardChange: { fields: { rate: 'u16' } },
       WithdrawalConfigChange: { fields: { tier_configs_cid: 'BoundedVec', enabled: 'bool' } },
       MinRepurchaseRateChange: { fields: { min_rate: 'u16' } },

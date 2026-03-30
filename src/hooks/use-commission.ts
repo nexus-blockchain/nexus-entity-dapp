@@ -15,6 +15,8 @@ import type {
   WithdrawalRecord,
   TokenWithdrawalRecord,
   ShopCommissionTotals,
+  RepurchaseConfig,
+  ShoppingBalanceExpiryEntry,
 } from '@/lib/types/models';
 
 // ─── Generic Unwrapper ──────────────────────────────────────
@@ -71,7 +73,7 @@ function parseCoreCommissionConfig(raw: unknown): CoreCommissionConfig | null {
     maxCommissionRate: Number(obj.maxCommissionRate ?? obj.max_commission_rate ?? 0),
     enabled: Boolean(obj.enabled),
     withdrawalCooldown: Number(obj.withdrawalCooldown ?? obj.withdrawal_cooldown ?? 0),
-    creatorRewardRate: Number(obj.creatorRewardRate ?? obj.creator_reward_rate ?? 0),
+    ownerRewardRate: Number(obj.ownerRewardRate ?? obj.owner_reward_rate ?? 0),
     tokenWithdrawalCooldown: Number(obj.tokenWithdrawalCooldown ?? obj.token_withdrawal_cooldown ?? 0),
     pluginBudgetCaps: parsePluginBudgetCaps(obj.pluginCaps ?? obj.plugin_caps ?? obj.pluginBudgetCaps ?? obj.plugin_budget_caps ?? null),
   };
@@ -561,7 +563,7 @@ export function useCommission() {
   const configureWithdrawal = useEntityMutation(PALLET, 'setWithdrawalConfig', { invalidateKeys });
   const setTokenWithdrawalConfig = useEntityMutation(PALLET, 'setTokenWithdrawalConfig', { invalidateKeys });
   const pauseWithdrawal = useEntityMutation(PALLET, 'pauseWithdrawals', { invalidateKeys });
-  const setCreatorRewardRate = useEntityMutation(PALLET, 'setCreatorRewardRate', { invalidateKeys });
+  const setOwnerRewardRate = useEntityMutation(PALLET, 'setOwnerRewardRate', { invalidateKeys });
   const setWithdrawalCooldown = useEntityMutation(PALLET, 'setWithdrawalCooldown', { invalidateKeys });
   const setMinWithdrawalInterval = useEntityMutation(PALLET, 'setMinWithdrawalInterval', { invalidateKeys });
   const clearCommissionConfig = useEntityMutation(PALLET, 'clearCommissionConfig', { invalidateKeys });
@@ -598,6 +600,77 @@ export function useCommission() {
   const retryPendingTokenRefund = useEntityMutation(PALLET, 'retryPendingTokenRefund', { invalidateKeys });
   const setReferrerExemptThreshold = useEntityMutation(PALLET, 'setReferrerExemptThreshold', { invalidateKeys });
   const setReferrerPayoutDisabled = useEntityMutation(PALLET, 'setReferrerPayoutDisabled', { invalidateKeys });
+
+  // ─── RepurchaseConfig query ───────────────────────────────
+
+  const repurchaseConfigQuery = useEntityQuery<RepurchaseConfig | null>(
+    ['entity', entityId, 'commission', 'repurchaseConfig'],
+    async (api) => {
+      if (!hasPallet(api, PALLET)) return null;
+      const fn = (api.query as any)[PALLET].repurchaseConfigs;
+      if (!fn) return null;
+      const raw = await fn(entityId);
+      if (!raw || raw.isNone) return null;
+      const obj = raw.unwrap().toJSON();
+      return {
+        minPackageUsdt: Number(obj.minPackageUsdt ?? obj.min_package_usdt ?? 0),
+        enforced: Boolean(obj.enforced),
+        autoOrder: Boolean(obj.autoOrder ?? obj.auto_order),
+        defaultProductId: Number(obj.defaultProductId ?? obj.default_product_id ?? 0),
+        shoppingBalanceTtlBlocks: Number(obj.shoppingBalanceTtlBlocks ?? obj.shopping_balance_ttl_blocks ?? 0),
+        maxShoppingBalanceUsdt: Number(obj.maxShoppingBalanceUsdt ?? obj.max_shopping_balance_usdt ?? 0),
+      };
+    },
+    { staleTime: STALE_TIMES.members },
+  );
+
+  // ─── 购物余额到期列表（链下计算）────────────────────────────
+  // 遍历 MemberShoppingBalanceLastCredited 全部记录，返回已排序的到期状态列表
+
+  const useShoppingBalanceExpiryList = () =>
+    useEntityQuery<ShoppingBalanceExpiryEntry[]>(
+      ['entity', entityId, 'commission', 'shoppingBalanceExpiry'],
+      async (api) => {
+        if (!hasPallet(api, PALLET)) return [];
+        const config = repurchaseConfigQuery.data;
+        if (!config || config.shoppingBalanceTtlBlocks === 0) return [];
+
+        const fn = (api.query as any)[PALLET].memberShoppingBalanceLastCredited;
+        if (!fn?.entries) return [];
+
+        const currentBlockRaw = await (api.query as any).system.number();
+        const currentBlock = Number(currentBlockRaw.toJSON?.() ?? currentBlockRaw);
+        const ttl = config.shoppingBalanceTtlBlocks;
+        // 1天内 ≈ 14400 blocks（6s/block）
+        const EXPIRING_SOON_THRESHOLD = 14400;
+
+        const entries: [any, any][] = await fn.entries(entityId);
+        const result: ShoppingBalanceExpiryEntry[] = entries
+          .map(([key, value]: [any, any]) => {
+            const account = key.args[1].toString();
+            const lastCredited = Number(value.toJSON?.() ?? value);
+            const expireAtBlock = lastCredited + ttl;
+            const blocksLeft = expireAtBlock - currentBlock;
+            const status: ShoppingBalanceExpiryEntry['status'] =
+              blocksLeft <= 0 ? 'expired'
+              : blocksLeft <= EXPIRING_SOON_THRESHOLD ? 'expiring_soon'
+              : 'active';
+            return { account, lastCredited, expireAtBlock, blocksLeft, status };
+          });
+
+        // 已过期优先，然后按剩余时间升序
+        result.sort((a, b) => a.blocksLeft - b.blocksLeft);
+        return result;
+      },
+      { staleTime: STALE_TIMES.members, enabled: (repurchaseConfigQuery.data?.shoppingBalanceTtlBlocks ?? 0) > 0 },
+    );
+
+  // ─── RepurchaseConfig mutations ───────────────────────────
+
+  const setRepurchaseConfig = useEntityMutation(PALLET, 'setRepurchaseConfig', { invalidateKeys });
+  const expireShoppingBalance = useEntityMutation(PALLET, 'expireShoppingBalance', {
+    invalidateKeys: [...invalidateKeys, ['entity', entityId, 'commission', 'shoppingBalanceExpiry']],
+  });
 
   return {
     // Core config
@@ -649,7 +722,7 @@ export function useCommission() {
     configureWithdrawal,
     setTokenWithdrawalConfig,
     pauseWithdrawal,
-    setCreatorRewardRate,
+    setOwnerRewardRate,
     setWithdrawalCooldown,
     setMinWithdrawalInterval,
     clearCommissionConfig,
@@ -682,6 +755,12 @@ export function useCommission() {
     retryPendingTokenRefund,
     setReferrerExemptThreshold,
     setReferrerPayoutDisabled,
+
+    // RepurchaseConfig
+    repurchaseConfig: repurchaseConfigQuery.data ?? null,
+    useShoppingBalanceExpiryList,
+    setRepurchaseConfig,
+    expireShoppingBalance,
   };
 }
 

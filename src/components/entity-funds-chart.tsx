@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { ShieldCheck, ShieldAlert, ShieldX, Wallet } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 // ─── Colors ──────────────────────────────────────────────
 
@@ -22,13 +23,13 @@ const COLORS = {
 
 const HEALTH_CONFIG: Record<number, {
   icon: typeof ShieldCheck;
-  label: string;
+  labelKey: string;
   color: string;
   badge: 'success' | 'warning' | 'destructive';
 }> = {
-  2: { icon: ShieldCheck, label: 'Healthy',  color: 'text-green-600',  badge: 'success' },
-  1: { icon: ShieldAlert, label: 'Warning',  color: 'text-yellow-600', badge: 'warning' },
-  0: { icon: ShieldX,     label: 'Critical', color: 'text-red-600',    badge: 'destructive' },
+  2: { icon: ShieldCheck, labelKey: 'healthy',  color: 'text-green-600',  badge: 'success' },
+  1: { icon: ShieldAlert, labelKey: 'warning',  color: 'text-yellow-600', badge: 'warning' },
+  0: { icon: ShieldX,     labelKey: 'critical', color: 'text-red-600',    badge: 'destructive' },
 };
 
 // ─── Custom Tooltip ──────────────────────────────────────
@@ -51,16 +52,17 @@ function ChartTooltip({ active, payload }: any) {
 
 export function EntityFundsChart() {
   const { funds, isLoading } = useEntityFunds();
+  const t = useTranslations('funds');
 
   const chartData = useMemo(() => {
     if (!funds) return [];
 
     const items = [
-      { name: 'Available',           value: funds.available,                      color: COLORS.available },
-      { name: 'Pending Commission',  value: funds.protected.pendingCommission,    color: COLORS.pendingCommission },
-      { name: 'Shopping Balance',    value: funds.protected.shoppingBalance,      color: COLORS.shoppingBalance },
-      { name: 'Unallocated Pool',    value: funds.protected.unallocatedPool,      color: COLORS.unallocatedPool },
-      { name: 'Pending Refund',      value: funds.protected.pendingRefund,        color: COLORS.pendingRefund },
+      { name: t('available'),          value: funds.available,                      color: COLORS.available },
+      { name: t('pendingCommission'),   value: funds.protected.pendingCommission,    color: COLORS.pendingCommission },
+      { name: t('shoppingBalance'),     value: funds.protected.shoppingBalance,      color: COLORS.shoppingBalance },
+      { name: t('unallocatedPool'),     value: funds.protected.unallocatedPool,      color: COLORS.unallocatedPool },
+      { name: t('pendingRefund'),       value: funds.protected.pendingRefund,        color: COLORS.pendingRefund },
     ];
 
     // Filter out zero-value slices, convert bigint to number for recharts
@@ -75,7 +77,7 @@ export function EntityFundsChart() {
         color: i.color,
         percent: total > BigInt(0) ? Number((i.value * BigInt(1000)) / total) / 10 : 0,
       }));
-  }, [funds]);
+  }, [funds, t]);
 
   if (isLoading) {
     return (
@@ -109,11 +111,11 @@ export function EntityFundsChart() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Wallet className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Fund Overview</CardTitle>
+            <CardTitle className="text-base">{t('title')}</CardTitle>
           </div>
           <Badge variant={healthCfg.badge} className="gap-1">
             <HealthIcon className="h-3 w-3" />
-            {healthCfg.label}
+            {t(healthCfg.labelKey as any)}
           </Badge>
         </div>
       </CardHeader>
@@ -147,29 +149,31 @@ export function EntityFundsChart() {
           </ResponsiveContainer>
         ) : (
           <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-            No fund data
+            {t('noFundData')}
           </div>
         )}
 
         {/* Balance summary */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <div>
-            <p className="text-xs text-muted-foreground">Treasury Balance</p>
+            <p className="text-xs text-muted-foreground">{t('treasuryBalance')}</p>
             <p className="font-semibold">{formatNex(funds.treasuryBalance)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Available</p>
+            <p className="text-xs text-muted-foreground">{t('available')}</p>
             <p className="font-semibold text-green-600">{formatNex(funds.available)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Protected Total</p>
+            <p className="text-xs text-muted-foreground">{t('protectedTotal')}</p>
             <p className="font-semibold text-blue-600">{formatNex(funds.protectedTotal)}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">
-              {funds.protectedTotal > BigInt(0)
-                ? `${Number((funds.protectedTotal * BigInt(100)) / funds.treasuryBalance)}% locked`
-                : '0% locked'}
+              {t('percentLocked', {
+                pct: funds.protectedTotal > BigInt(0)
+                  ? Number((funds.protectedTotal * BigInt(100)) / funds.treasuryBalance)
+                  : 0,
+              })}
             </p>
           </div>
         </div>
@@ -177,12 +181,12 @@ export function EntityFundsChart() {
         {/* Protected breakdown detail */}
         {funds.protectedTotal > BigInt(0) && (
           <div className="space-y-1.5 rounded-md bg-secondary/30 p-3">
-            <p className="text-xs font-medium text-muted-foreground mb-1">Protected Breakdown</p>
+            <p className="text-xs font-medium text-muted-foreground mb-1">{t('protectedBreakdown')}</p>
             {[
-              { label: 'Pending Commission', value: funds.protected.pendingCommission, color: COLORS.pendingCommission },
-              { label: 'Shopping Balance',   value: funds.protected.shoppingBalance,   color: COLORS.shoppingBalance },
-              { label: 'Unallocated Pool',   value: funds.protected.unallocatedPool,   color: COLORS.unallocatedPool },
-              { label: 'Pending Refund',     value: funds.protected.pendingRefund,     color: COLORS.pendingRefund },
+              { label: t('pendingCommission'), value: funds.protected.pendingCommission, color: COLORS.pendingCommission },
+              { label: t('shoppingBalance'),   value: funds.protected.shoppingBalance,   color: COLORS.shoppingBalance },
+              { label: t('unallocatedPool'),    value: funds.protected.unallocatedPool,   color: COLORS.unallocatedPool },
+              { label: t('pendingRefund'),      value: funds.protected.pendingRefund,     color: COLORS.pendingRefund },
             ]
               .filter((r) => r.value > BigInt(0))
               .map((r) => (
@@ -200,23 +204,23 @@ export function EntityFundsChart() {
         {/* Fund Protection Rules */}
         {pc && (pc.minTreasuryThreshold > BigInt(0) || pc.maxSingleSpend > BigInt(0) || pc.maxDailySpend > BigInt(0)) && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Protection Rules</p>
+            <p className="text-xs font-medium text-muted-foreground">{t('protectionRules')}</p>
             <div className="grid grid-cols-3 gap-2 text-xs">
               {pc.minTreasuryThreshold > BigInt(0) && (
                 <div className="rounded bg-secondary/50 px-2 py-1.5 text-center">
-                  <p className="text-muted-foreground">Min Threshold</p>
+                  <p className="text-muted-foreground">{t('minThreshold')}</p>
                   <p className="font-medium mt-0.5">{formatNex(pc.minTreasuryThreshold)}</p>
                 </div>
               )}
               {pc.maxSingleSpend > BigInt(0) && (
                 <div className="rounded bg-secondary/50 px-2 py-1.5 text-center">
-                  <p className="text-muted-foreground">Max Single</p>
+                  <p className="text-muted-foreground">{t('maxSingle')}</p>
                   <p className="font-medium mt-0.5">{formatNex(pc.maxSingleSpend)}</p>
                 </div>
               )}
               {pc.maxDailySpend > BigInt(0) && (
                 <div className="rounded bg-secondary/50 px-2 py-1.5 text-center">
-                  <p className="text-muted-foreground">Max Daily</p>
+                  <p className="text-muted-foreground">{t('maxDaily')}</p>
                   <p className="font-medium mt-0.5">{formatNex(pc.maxDailySpend)}</p>
                 </div>
               )}
@@ -226,7 +230,7 @@ export function EntityFundsChart() {
             {pc.maxDailySpend > BigInt(0) && (
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Daily Spent</span>
+                  <span className="text-muted-foreground">{t('dailySpent')}</span>
                   <span className="font-medium">
                     {formatNex(pc.dailySpent)} / {formatNex(pc.maxDailySpend)}
                   </span>
@@ -246,13 +250,13 @@ export function EntityFundsChart() {
             {funds.health.belowMinOperating && (
               <div className="flex items-center gap-1.5 text-xs text-destructive">
                 <ShieldX className="h-3 w-3" />
-                <span>Available funds below minimum operating balance</span>
+                <span>{t('alertBelowMinOperating')}</span>
               </div>
             )}
             {funds.health.belowThreshold && (
               <div className="flex items-center gap-1.5 text-xs text-yellow-600">
                 <ShieldAlert className="h-3 w-3" />
-                <span>Treasury below governance threshold</span>
+                <span>{t('alertBelowThreshold')}</span>
               </div>
             )}
           </div>

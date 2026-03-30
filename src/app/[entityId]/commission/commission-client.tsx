@@ -43,6 +43,7 @@ const PLUGIN_LIST: { key: CommissionPlugin; bit: number; route: string }[] = [
   { key: CommissionPlugin.SingleLine, bit: 0x180, route: 'singleline' },   // SINGLE_LINE_UPLINE|SINGLE_LINE_DOWNLINE
   { key: CommissionPlugin.Team, bit: 0x004, route: 'team' },
   { key: CommissionPlugin.PoolReward, bit: 0x200, route: 'poolreward' },
+  { key: CommissionPlugin.OwnerReward, bit: 0x400, route: '' },           // OWNER_REWARD — no sub-page
 ];
 
 function bpsDisplay(bps: number): string {
@@ -137,16 +138,16 @@ function OverviewSection() {
     globalCommissionPaused,
     enableCommission,
     setCommissionRate,
-    setCreatorRewardRate,
+    setOwnerRewardRate,
     setWithdrawalCooldown,
   } = useCommission();
 
   const { isLocked, setLocked } = useTxLock();
-  const localBusy = isTxBusy(enableCommission) || isTxBusy(setCommissionRate) || isTxBusy(setCreatorRewardRate) || isTxBusy(setWithdrawalCooldown);
+  const localBusy = isTxBusy(enableCommission) || isTxBusy(setCommissionRate) || isTxBusy(setOwnerRewardRate) || isTxBusy(setWithdrawalCooldown);
   useEffect(() => { setLocked(localBusy); }, [localBusy, setLocked]);
 
   const [rate, setRate] = useState('');
-  const [creatorRate, setCreatorRate] = useState('');
+  const [ownerRate, setOwnerRate] = useState('');
   const [cooldownNex, setCooldownNex] = useState('');
   const [cooldownToken, setCooldownToken] = useState('');
 
@@ -163,11 +164,11 @@ function OverviewSection() {
   const handleSetCreatorRate = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (isLocked || !creatorRate.trim()) return;
-      setCreatorRewardRate.mutate([entityId, Number(creatorRate)]);
-      setCreatorRate('');
+      if (isLocked || !ownerRate.trim()) return;
+      setOwnerRewardRate.mutate([entityId, Number(ownerRate)]);
+      setOwnerRate('');
     },
-    [entityId, creatorRate, setCreatorRewardRate, isLocked],
+    [entityId, ownerRate, setOwnerRewardRate, isLocked],
   );
 
   const handleSetCooldown = useCallback(
@@ -219,15 +220,15 @@ function OverviewSection() {
 
           {/* Creator reward rate */}
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">{t('creatorRewardRate')}</p>
-            <p className="text-sm font-medium">{bpsDisplay(coreConfig?.creatorRewardRate ?? 0)}</p>
+            <p className="text-xs text-muted-foreground">{t('ownerRewardRate')}</p>
+            <p className="text-sm font-medium">{bpsDisplay(coreConfig?.ownerRewardRate ?? 0)}</p>
           </div>
 
           {/* Enabled modes (hex) */}
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t('enabledModes')}</p>
             <p className="font-mono text-sm font-medium">
-              0x{enabledModes.toString(16).toUpperCase().padStart(3, '0')}
+              {enabledModes}
             </p>
           </div>
 
@@ -316,20 +317,20 @@ function OverviewSection() {
           {/* Set creator reward rate */}
           <form onSubmit={handleSetCreatorRate} className="flex items-end gap-3">
             <div className="space-y-2">
-              <LabelWithTip htmlFor="creator-rate-input" tip={t('help.creatorRewardRate')}>{t('creatorRewardRate')}</LabelWithTip>
+              <LabelWithTip htmlFor="owner-rate-input" tip={t('help.ownerRewardRate')}>{t('ownerRewardRate')}</LabelWithTip>
               <Input
-                id="creator-rate-input"
+                id="owner-rate-input"
                 type="number"
-                value={creatorRate}
-                onChange={(e) => setCreatorRate(e.target.value)}
+                value={ownerRate}
+                onChange={(e) => setOwnerRate(e.target.value)}
                 placeholder="bps"
                 className="w-40"
               />
             </div>
             <Button type="submit" disabled={isLocked}>
-              {t('setCreatorRewardRate')}
+              {t('setOwnerRewardRate')}
             </Button>
-            <TxStatusIndicator txState={setCreatorRewardRate.txState} />
+            <TxStatusIndicator txState={setOwnerRewardRate.txState} />
           </form>
 
           {/* Set withdrawal cooldown */}
@@ -568,6 +569,7 @@ const PLUGIN_CAP_MAP: Record<string, PluginCapKey | null> = {
   [CommissionPlugin.SingleLine]: 'singleLineCap',
   [CommissionPlugin.Team]: 'teamCap',
   [CommissionPlugin.PoolReward]: null,
+  [CommissionPlugin.OwnerReward]: null,
 };
 
 function PluginSection() {
@@ -654,11 +656,13 @@ function PluginSection() {
                         <p className="text-xs text-muted-foreground">{key}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Link href={`/${entityId}/commission/${route}`}>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                            {tc('viewDetails')}
-                          </Button>
-                        </Link>
+                        {route && (
+                          <Link href={`/${entityId}/commission/${route}`}>
+                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                              {tc('viewDetails')}
+                            </Button>
+                          </Link>
+                        )}
                         <Switch
                           checked={isEnabled}
                           onCheckedChange={() => handleToggle(key, bit)}
@@ -734,15 +738,15 @@ function CommissionPreviewSection() {
   const [orderAmount, setOrderAmount] = useState('10000');
   const enabledModes = coreConfig?.enabledModes ?? 0;
   const maxRate = coreConfig?.maxCommissionRate ?? 0;
-  const creatorRate = coreConfig?.creatorRewardRate ?? 0;
+  const ownerRate = coreConfig?.ownerRewardRate ?? 0;
   const budgetCaps = coreConfig?.pluginBudgetCaps;
 
   const amount = Number(orderAmount) || 0;
 
   // Compute Pool B
   const poolB = amount * maxRate / 10000;
-  const creatorReward = poolB * creatorRate / 10000;
-  const pluginBudget = poolB - creatorReward;
+  const ownerReward = poolB * ownerRate / 10000;
+  const pluginBudget = poolB - ownerReward;
 
   // Plugin info with caps
   type PluginPreviewInfo = {
@@ -922,8 +926,8 @@ function CommissionPreviewSection() {
               </Card>
               <Card className="shadow-none">
                 <CardContent className="p-3">
-                  <p className="text-xs text-muted-foreground">{t('creatorReward')} ({(creatorRate / 100).toFixed(1)}%)</p>
-                  <p className="text-lg font-semibold">{creatorReward.toFixed(2)} USDT</p>
+                  <p className="text-xs text-muted-foreground">{t('ownerReward')} ({(ownerRate / 100).toFixed(1)}%)</p>
+                  <p className="text-lg font-semibold">{ownerReward.toFixed(2)} USDT</p>
                 </CardContent>
               </Card>
               <Card className="shadow-none">
@@ -940,11 +944,11 @@ function CommissionPreviewSection() {
                 <p className="text-xs font-medium text-muted-foreground">{t('rateBreakdown')}</p>
                 <div className="flex h-6 w-full overflow-hidden rounded-md">
                   {/* Creator portion */}
-                  {creatorReward > 0 && (
+                  {ownerReward > 0 && (
                     <div
                       className="bg-slate-400 flex items-center justify-center text-[10px] text-white"
-                      style={{ width: `${(creatorReward / poolB) * 100}%` }}
-                      title={`Creator: ${creatorReward.toFixed(2)}`}
+                      style={{ width: `${(ownerReward / poolB) * 100}%` }}
+                      title={`Owner: ${ownerReward.toFixed(2)}`}
                     />
                   )}
                   {pluginInfos.map((p, i) => {
@@ -1817,6 +1821,294 @@ function WithdrawSection() {
   );
 }
 
+// ─── Repurchase Config Section ──────────────────────────────
+
+function RepurchaseConfigSection() {
+  const t = useTranslations('commission');
+  const { entityId } = useEntityContext();
+  const {
+    repurchaseConfig,
+    useShoppingBalanceExpiryList,
+    setRepurchaseConfig,
+    expireShoppingBalance,
+  } = useCommission();
+  const { isLocked } = useTxLock();
+
+  const cfg = repurchaseConfig;
+
+  // 表单状态
+  const [minUsdt, setMinUsdt] = useState(String(cfg?.minPackageUsdt ?? 0));
+  const [enforced, setEnforced] = useState(cfg?.enforced ?? false);
+  const [autoOrder, setAutoOrder] = useState(cfg?.autoOrder ?? false);
+  const [productId, setProductId] = useState(String(cfg?.defaultProductId ?? 0));
+  const [ttlBlocks, setTtlBlocks] = useState(String(cfg?.shoppingBalanceTtlBlocks ?? 0));
+  const [maxShoppingUsdt, setMaxShoppingUsdt] = useState(String(cfg?.maxShoppingBalanceUsdt ?? 0));
+
+  // 同步链上配置到表单
+  React.useEffect(() => {
+    if (!cfg) return;
+    setMinUsdt(String(cfg.minPackageUsdt));
+    setEnforced(cfg.enforced);
+    setAutoOrder(cfg.autoOrder);
+    setProductId(String(cfg.defaultProductId));
+    setTtlBlocks(String(cfg.shoppingBalanceTtlBlocks));
+    setMaxShoppingUsdt(String(cfg.maxShoppingBalanceUsdt));
+  }, [cfg]);
+
+  // 到期列表（仅 TTL > 0 时有意义）
+  const expiryListQuery = useShoppingBalanceExpiryList();
+  const expiryList = expiryListQuery.data ?? [];
+  const expiredCount = expiryList.filter((e) => e.status === 'expired').length;
+  const expiringSoonCount = expiryList.filter((e) => e.status === 'expiring_soon').length;
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLocked) return;
+    setRepurchaseConfig.mutate([
+      entityId,
+      {
+        min_package_usdt: Number(minUsdt),
+        enforced,
+        auto_order: autoOrder,
+        default_product_id: Number(productId),
+        shopping_balance_ttl_blocks: Number(ttlBlocks),
+        max_shopping_balance_usdt: Number(maxShoppingUsdt),
+      },
+    ]);
+  };
+
+  const ttlBlocksNum = Number(ttlBlocks);
+  // 6s/block 换算为天数
+  const ttlDays = ttlBlocksNum > 0 ? (ttlBlocksNum * 6 / 86400).toFixed(1) : null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t('repurchaseConfig')}</CardTitle>
+        <CardDescription>{t('repurchaseConfigDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* 当前配置展示 */}
+        {cfg ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('minPackageUsdt')}</p>
+              <p className="text-sm font-medium">{cfg.minPackageUsdt} USDT</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('enforced')}</p>
+              <Badge variant={cfg.enforced ? 'success' : 'secondary'}>
+                {cfg.enforced ? t('yes') : t('no')}
+              </Badge>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('autoOrder')}</p>
+              <Badge variant={cfg.autoOrder ? 'success' : 'secondary'}>
+                {cfg.autoOrder ? t('enabled') : t('disabled')}
+              </Badge>
+            </div>
+            {cfg.autoOrder && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t('defaultProductId')}</p>
+                <p className="text-sm font-medium">#{cfg.defaultProductId}</p>
+              </div>
+            )}
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('shoppingBalanceTtl')}</p>
+              <p className="text-sm font-medium">
+                {cfg.shoppingBalanceTtlBlocks === 0
+                  ? t('ttlNeverExpires')
+                  : `${cfg.shoppingBalanceTtlBlocks} blocks (~${(cfg.shoppingBalanceTtlBlocks * 6 / 86400).toFixed(1)} ${t('days')})`}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t('maxShoppingBalanceUsdt')}</p>
+              <p className="text-sm font-medium">
+                {cfg.maxShoppingBalanceUsdt === 0
+                  ? t('noLimit')
+                  : `${cfg.maxShoppingBalanceUsdt} USDT`}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('repurchaseConfigNotSet')}</p>
+        )}
+
+        {/* 配置表单（Admin） */}
+        <Separator />
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="rp-min-usdt" tip={t('help.minPackageUsdt')}>
+                {t('minPackageUsdt')} (USDT cents)
+              </LabelWithTip>
+              <Input
+                id="rp-min-usdt"
+                type="number"
+                min={0}
+                value={minUsdt}
+                onChange={(e) => setMinUsdt(e.target.value)}
+                className="w-40"
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="rp-product-id" tip={t('help.defaultProductId')}>
+                {t('defaultProductId')}
+              </LabelWithTip>
+              <Input
+                id="rp-product-id"
+                type="number"
+                min={0}
+                value={productId}
+                onChange={(e) => setProductId(e.target.value)}
+                className="w-40"
+                disabled={!autoOrder}
+              />
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="rp-ttl" tip={t('help.shoppingBalanceTtl')}>
+                {t('shoppingBalanceTtl')} (blocks)
+              </LabelWithTip>
+              <Input
+                id="rp-ttl"
+                type="number"
+                min={0}
+                value={ttlBlocks}
+                onChange={(e) => setTtlBlocks(e.target.value)}
+                className="w-40"
+              />
+              {ttlDays && (
+                <p className="text-xs text-muted-foreground">≈ {ttlDays} {t('days')}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <LabelWithTip htmlFor="rp-max-shopping-usdt" tip={t('help.maxShoppingBalanceUsdt')}>
+                {t('maxShoppingBalanceUsdt')} (USDT)
+              </LabelWithTip>
+              <Input
+                id="rp-max-shopping-usdt"
+                type="number"
+                min={0}
+                value={maxShoppingUsdt}
+                onChange={(e) => setMaxShoppingUsdt(e.target.value)}
+                className="w-40"
+              />
+              <p className="text-xs text-muted-foreground">
+                {Number(maxShoppingUsdt) === 0 ? t('noLimit') : `${t('threshold')}: ${maxShoppingUsdt} USDT`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-6">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="rp-enforced"
+                checked={enforced}
+                onCheckedChange={setEnforced}
+                disabled={isLocked}
+              />
+              <Label htmlFor="rp-enforced">{t('enforced')}</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="rp-auto-order"
+                checked={autoOrder}
+                onCheckedChange={setAutoOrder}
+                disabled={isLocked}
+              />
+              <Label htmlFor="rp-auto-order">{t('autoOrder')}</Label>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={isLocked}>
+              {t('saveRepurchaseConfig')}
+            </Button>
+            <TxStatusIndicator txState={setRepurchaseConfig.txState} />
+          </div>
+        </form>
+
+        {/* 购物余额到期列表 */}
+        {cfg && cfg.shoppingBalanceTtlBlocks > 0 && (
+          <>
+            <Separator />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold">{t('shoppingBalanceExpiryList')}</p>
+                <div className="flex gap-2">
+                  {expiredCount > 0 && (
+                    <Badge variant="destructive">{expiredCount} {t('expired')}</Badge>
+                  )}
+                  {expiringSoonCount > 0 && (
+                    <Badge variant="warning">{expiringSoonCount} {t('expiringSoon')}</Badge>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{t('expiryListDesc')}</p>
+
+              {expiryListQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : expiryList.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">{t('noExpiryEntries')}</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('account')}</TableHead>
+                      <TableHead>{t('lastCreditedBlock')}</TableHead>
+                      <TableHead>{t('expiresAtBlock')}</TableHead>
+                      <TableHead>{t('status')}</TableHead>
+                      <TableHead className="text-right">{t('action')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {expiryList.map((entry) => (
+                      <TableRow key={entry.account}>
+                        <TableCell className="font-mono text-xs max-w-[140px] truncate">
+                          {entry.account}
+                        </TableCell>
+                        <TableCell className="text-xs">#{entry.lastCredited}</TableCell>
+                        <TableCell className="text-xs">#{entry.expireAtBlock}</TableCell>
+                        <TableCell>
+                          {entry.status === 'expired' && (
+                            <Badge variant="destructive">{t('expired')}</Badge>
+                          )}
+                          {entry.status === 'expiring_soon' && (
+                            <Badge variant="warning">{t('expiringSoon')}</Badge>
+                          )}
+                          {entry.status === 'active' && (
+                            <Badge variant="secondary">
+                              {t('blocksLeft', { n: entry.blocksLeft })}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {entry.status === 'expired' && (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={isLocked}
+                              onClick={() => expireShoppingBalance.mutate([entityId, entry.account])}
+                            >
+                              {t('triggerExpiry')}
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Entity Funds Section ───────────────────────────────────
 
 function EntityFundsSection() {
@@ -2331,6 +2623,7 @@ export function CommissionPage() {
         <PluginSection />
         <CommissionPreviewSection />
         <WithdrawalConfigSection />
+        <RepurchaseConfigSection />
       </PermissionGuard>
 
       <WithdrawSection />

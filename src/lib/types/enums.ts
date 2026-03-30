@@ -206,7 +206,7 @@ export enum WithdrawalModeType {
   MemberChoice = 'MemberChoice',
 }
 
-// 佣金插件模式 - 6 种
+// 佣金插件模式 - 7 种
 export enum CommissionPlugin {
   Referral = 'Referral',
   MultiLevel = 'MultiLevel',
@@ -214,6 +214,7 @@ export enum CommissionPlugin {
   SingleLine = 'SingleLine',
   Team = 'Team',
   PoolReward = 'PoolReward',
+  OwnerReward = 'OwnerReward',
 }
 
 // 升级模式 - 2 种（等级系统级别）
